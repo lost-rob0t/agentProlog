@@ -77,7 +77,11 @@ test("unload fails pending work and terminates a sidecar that does not exit", as
   const transport = new SidecarTransport({ command: "sidecar", spawn: fakeSpawnFactory(child, []), shutdownMs: 1 });
   await transport.start();
   const pending = transport.request({ version: PROTOCOL_VERSION, request_id: "req-3", session_id: "s", operation: "session.inspect", payload: {} });
+  // Attach the rejection assertion before disposal. stop() synchronously rejects
+  // outstanding bridge work, and Node correctly treats an as-yet-unobserved
+  // rejection as an unhandled test failure.
+  const rejected = assert.rejects(pending, error => error.code === "bridge_disposed");
   await transport.stop("plugin unload");
-  await assert.rejects(pending, error => error.code === "bridge_disposed");
+  await rejected;
   assert.deepEqual(child.killed, ["SIGTERM"]);
 });
