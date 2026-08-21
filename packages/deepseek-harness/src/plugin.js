@@ -1,5 +1,6 @@
 import { ProtocolError } from "./protocol.js";
 import { SidecarTransport } from "./sidecar.js";
+import { assertHarnessCompatibility } from "./compatibility.js";
 
 export const SERVICE_NAME = "agentPrologRlm";
 
@@ -17,6 +18,14 @@ export async function apply(ctx, config = {}, { Transport = SidecarTransport } =
   if (!config.command) {
     throw new ProtocolError("bridge_spawn_failed", "Nix-pinned sidecar command is required");
   }
+  if (!config.harness) {
+    throw new ProtocolError("harness_identity_required", "Pinned DeepSeek Harness version and revision are required");
+  }
+
+  // Fail before spawning any process or publishing any Cordis service. Harness
+  // is developer preview; compatibility is an explicit host boundary, not a
+  // best-effort warning after resources already exist.
+  assertHarnessCompatibility(config.harness);
 
   const transport = new Transport({
     command: config.command,
