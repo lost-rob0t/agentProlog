@@ -17,13 +17,13 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
-        swiProlog = pkgs."swi-prolog";
         upstream = prolog-rlm.packages.${system}.default;
+        upstreamSwipl = "${upstream}/bin/prolog-rlm-swipl";
         agentProlog = pkgs.writeShellApplication {
           name = "agentProlog";
-          runtimeInputs = [ swiProlog upstream ];
+          runtimeInputs = [ upstream ];
           text = ''
-            exec swipl -q -g "use_module(library(rlm)),writeln('AgentProlog runtime ready'),halt" -- "$@"
+            exec ${upstreamSwipl} -q -g "use_module(library(rlm)),writeln('AgentProlog runtime ready'),halt" -- "$@"
           '';
         };
       in {
@@ -34,16 +34,16 @@
         apps.default = self.apps.${system}.agentProlog;
 
         devShells.default = pkgs.mkShell {
-          packages = [ swiProlog upstream ];
+          packages = [ upstream ];
         };
 
         checks.runtime-load = pkgs.runCommand "agentprolog-runtime-load" {
-          nativeBuildInputs = [ swiProlog upstream ];
+          nativeBuildInputs = [ upstream ];
         } ''
           export HOME="$TMPDIR/home"
           mkdir -p "$HOME"
           cd "$TMPDIR"
-          swipl -q -g "use_module(library(rlm)),halt"
+          ${upstreamSwipl} -q -g "use_module(library(rlm)),halt"
           touch "$out"
         '';
 
