@@ -17,10 +17,7 @@
 protocol_version(1).
 
 main(_) :-
-    setup_call_cleanup(
-        open_runtime,
-        request_loop,
-        close_runtime).
+    setup_call_cleanup(open_runtime, request_loop, close_runtime).
 
 open_runtime :-
     rlm_conversation:conversation_store_open(memory, Outcome),
@@ -57,8 +54,7 @@ handle_line(Line) :-
 
 dispatch(Frame) :-
     require_request_frame(Frame),
-    Operation = Frame.operation,
-    dispatch_operation(Operation, Frame).
+    dispatch_operation(Frame.operation, Frame).
 
 dispatch_operation("runtime.describe", Frame) :- !,
     protocol_version(Version),
@@ -99,24 +95,25 @@ session_start(Frame) :-
 
 session_turn(Frame) :-
     SessionId = Frame.session_id,
-    (   sidecar_session(SessionId, Conversation)
-    ->  true
-    ;   reply_error(Frame, "session_not_found",
-                    _{message:"session.start must succeed before session.turn"}),
-        !,
-        fail
-    ),
-    (   sidecar_turn(SessionId, _, _)
+    (   \+ sidecar_session(SessionId, _)
+    ->  reply_error(Frame, "session_not_found",
+                    _{message:"session.start must succeed before session.turn"})
+    ;   sidecar_turn(SessionId, _, _)
     ->  reply_error(Frame, "session_busy",
                     _{message:"only one canonical turn may execute per session"})
-    ;   rlm_completion:rlm_cancellation_token(Token),
-        RequestId = Frame.request_id,
-        assertz(sidecar_turn(SessionId, RequestId, Token)),
-        catch(thread_create(run_turn(Frame, Conversation, Token), _, [detached(true)]),
-              Error,
-              ( retractall(sidecar_turn(SessionId, RequestId, Token)),
-                reply_exception(Frame, turn_start, Error) ))
+    ;   sidecar_session(SessionId, Conversation),
+        start_turn_worker(Frame, Conversation)
     ).
+
+start_turn_worker(Frame, Conversation) :-
+    rlm_completion:rlm_cancellation_token(Token),
+    SessionId = Frame.session_id,
+    RequestId = Frame.request_id,
+    assertz(sidecar_turn(SessionId, RequestId, Token)),
+    catch(thread_create(run_turn(Frame, Conversation, Token), _, [detached(true)]),
+          Error,
+          ( retractall(sidecar_turn(SessionId, RequestId, Token)),
+            reply_exception(Frame, turn_start, Error) )).
 
 run_turn(Frame, Conversation, Token) :-
     SessionId = Frame.session_id,
@@ -128,14 +125,14 @@ run_turn(Frame, Conversation, Token) :-
           retractall(sidecar_cancelled(SessionId, RequestId)) )).
 
 run_turn_guarded(Frame, Conversation, Token) :-
-    catch(run_turn_call(Frame, Conversation, Token, Outcome),
+    catch(run_turn_call(Frame, Conversation, Token, Outcome, Model),
           Error,
           Outcome = exception(Error)),
     (   sidecar_cancelled(Frame.session_id, Frame.request_id)
     ->  reply_status(Frame, "cancelled", _{},
                      _{code:"cancelled", message:"canonical Prolog-RLM turn cancelled"})
     ;   Outcome = ok(Turn)
-    ->  turn_payload(Frame, Turn, Payload),
+    ->  turn_payload(Turn, Model, Payload),
         reply_ok(Frame, Payload)
     ;   Outcome = error(Error)
     ->  safe_term_string(Error, Text),
@@ -146,7 +143,7 @@ run_turn_guarded(Frame, Conversation, Token) :-
         reply_error(Frame, "invalid_turn_outcome", _{message:Text})
     ).
 
-run_turn_call(Frame, Conversation, Token, Outcome) :-
+run_turn_call(Frame, Conversation, Token, Outcome, Model) :-
     payload_dict(Frame, Payload),
     require_payload_text(Payload, text, Text),
     turn_provider(Payload, Provider, Model),
@@ -159,8 +156,7 @@ run_turn_call(Frame, Conversation, Token, Outcome) :-
         Conversation,
         message(user, Text),
         [completion_options(CompletionOptions)],
-        Outcome),
-    nb_setval(agentprolog_dsh_last_model, Model).
+        Outcome).
 
 turn_provider(Payload, Provider, Model) :-
     (   get_dict(provider, Payload, RequestedProvider),
@@ -177,12 +173,9 @@ turn_provider(Payload, Provider, Model) :-
     ),
     rlm_chain:openrouter_provider(Model, Provider).
 
-turn_payload(_Frame, Turn, Payload) :-
+turn_payload(Turn, Model, Payload) :-
     AssistantText = Turn.assistant.content,
-    (   nb_current(agentprolog_dsh_last_model, Model)
-    ->  atom_string(Model, ModelText)
-    ;   ModelText = "unknown"
-    ),
+    atom_string(Model, ModelText),
     (   get_dict(completion, Turn, Completion),
         is_dict(Completion),
         get_dict(usage, Completion, Usage),
@@ -201,7 +194,8 @@ session_cancel(Frame) :-
             Active),
     cancel_turns(SessionId, Active),
     length(Active, Count),
-    reply_ok(Frame, _{accepted:Count > 0, active_turns:Count}).
+    ( Count > 0 -> Accepted = true ; Accepted = false ),
+    reply_ok(Frame, _{accepted:Accepted, active_turns:Count}).
 
 cancel_turns(_, []).
 cancel_turns(SessionId, [RequestId-Token|Rest]) :-
