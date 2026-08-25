@@ -1,10 +1,11 @@
 import { ProtocolError } from "./protocol.js";
 
-// Required compatibility target. DeepSeek Harness is developer preview, so the
-// plugin fails closed instead of silently widening its supported host surface.
+// Required compatibility target from prolog-rlm#184. DeepSeek Harness is
+// developer preview, so the plugin fails closed instead of silently widening
+// its supported host surface.
 export const SUPPORTED_HARNESS = Object.freeze({
-  version: "0.1.1-rc.1",
-  revision: "528c682e061696f5a160f363f236ecbf53cbd006",
+  version: "0.1.1-rc.2",
+  revision: "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
   node: "^22.19.0 || >=24.0.0",
 });
 
