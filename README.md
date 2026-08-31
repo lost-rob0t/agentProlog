@@ -1,47 +1,63 @@
-# Starintel Multi-Agent System Pack
+# AgentProlog
 
-Repository-root instructions, workflow scripts, Agent Zero support, and **136 focused skills** for major coding-agent systems.
+AgentProlog is the standalone coding-agent product built on [`lost-rob0t/prolog-rlm`](https://github.com/lost-rob0t/prolog-rlm).
 
-## Core Files
+The repository owns product composition and UX. `prolog-rlm` remains the reusable SWI-Prolog runtime/library.
 
-- `AGENTS.md` — canonical instructions
-- `CLAUDE.md`
-- `CODEX.md`
-- adapters for Cursor, Windsurf, Cline, Roo, Continue, Copilot, Aider, Gemini, and generic agents
-- Agent Zero profile and installer
-- `skills/` — 136 reusable `SKILL.md` packages
-- `scripts/implement.py`
-- `scripts/mark-design.py`
-- `scripts/sync.py`
-- `scripts/search.py`
-- `scripts/save-research`
-
-## Org Workflow
-
-```bash
-python scripts/sync.py
-python scripts/implement.py roam/design/star-server/STAR-SERVER-001-example.org
-
-python scripts/mark-design.py implemented   --summary "Added a CL-GServer round-robin router pool"   --file source/actors.lisp   --test "nix flake check: passed"
-
-python scripts/sync.py
+```text
+AgentProlog
+  -> DeepSeek Harness / Cordis integration
+  -> AgentFactory / frontend adapters
+  -> product configuration and defaults
+  -> coding workflow + coding tool packs
+  -> public prolog-rlm APIs
+  -> Prolog-RLM runtime
 ```
 
-Rejected design:
+Dependency direction is strictly:
 
-```bash
-python scripts/mark-design.py rejected   --reason "The design duplicates Star Router responsibilities"   --evidence "Repository architecture review"   --replacement "Use CL-GServer only for in-process routee pools"
-
-python scripts/sync.py
+```text
+agentProlog -> prolog-rlm
 ```
 
-`sync.py` preserves the canonical design, writes an implementation or rejection record into it, updates status headers, mirrors directory structure, and clears only the active working copy.
+## Current state
 
-## Agent Zero
+The standalone packaging and persistent DSH/Prolog bridge substrate are on `main`.
+
+Current DSH work is tracked in:
+
+- issue #7 — plugin-only DeepSeek Harness AgentFactory;
+- PR #8 — active executable AgentFactory slice.
+
+The current integration uses the official DeepSeek Harness/Cordis surface as the workspace and presentation layer while keeping Prolog-RLM authoritative for provider/model calls, context compilation, tools, capabilities, authority, effects, conversations, agents/subagents, Spec/Plan/Verify, tracing, and usage.
+
+The old nested `prolog-rlm/agentProlog/` product harness has been removed upstream. Generic `prolog_agent_ui_v1` protocol/facade behavior remains reusable runtime infrastructure in `prolog-rlm`.
+
+## Repository responsibilities
+
+AgentProlog owns:
+
+- DeepSeek Harness / Cordis integration;
+- AgentFactory and frontend/session adapters;
+- product configuration and defaults;
+- headless coding workflow composition;
+- filesystem, Git, process, and test tool packs;
+- DSH/TUI/editor UX;
+- product-specific skill refinery and evolutionary-agent integrations.
+
+Generic runtime changes belong upstream in `prolog-rlm` rather than being duplicated here.
+
+## Development
 
 ```bash
-scripts/install-agent-zero.sh /a0/usr
+nix develop
+nix flake check
 ```
 
-See `docs/status-ledgers.md`, `docs/skill-index.md`, and `docs/agent-compatibility.md`.
-# prolog-rlm
+The repository consumes `prolog-rlm` through its Nix flake dependency.
+
+## Architecture authority
+
+- AgentProlog product epic: issue #1
+- DSH AgentFactory implementation: issue #7 / PR #8
+- upstream repository boundary: `lost-rob0t/prolog-rlm#141`
