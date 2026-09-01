@@ -3,6 +3,7 @@ export const PROTOCOL_VERSION = 1;
 const BASE_OPERATIONS = new Set([
   "runtime.describe",
   "session.start",
+  "session.turn",
   "session.cancel",
   "session.inspect",
 ]);

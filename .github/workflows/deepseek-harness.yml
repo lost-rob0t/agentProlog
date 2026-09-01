@@ -4,11 +4,13 @@ on:
   pull_request:
     paths:
       - "packages/deepseek-harness/**"
+      - "prolog/agentprolog_dsh_sidecar.pl"
       - ".github/workflows/deepseek-harness.yml"
   push:
     branches: [main]
     paths:
       - "packages/deepseek-harness/**"
+      - "prolog/agentprolog_dsh_sidecar.pl"
       - ".github/workflows/deepseek-harness.yml"
 
 permissions:
@@ -21,7 +23,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
-      - name: Protocol and lifecycle tests
+          node-version: "24"
+      - name: Activate pinned pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.7.0 --activate
+      - name: Install exact Harness compatibility surface
         working-directory: packages/deepseek-harness
-        run: npm test
+        run: pnpm install --no-frozen-lockfile
+      - name: Verify published rc2 imports
+        working-directory: packages/deepseek-harness
+        run: pnpm check:imports
+      - name: Protocol, plugin and AgentFactory tests
+        working-directory: packages/deepseek-harness
+        run: pnpm test
