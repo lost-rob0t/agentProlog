@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted for research purposes only. No TUI is installed, vendored, or depended on in this slice; agentProlog runs headless. The chosen TUI is consumed in a later slice, re-verifying command interoperability against the then-current release before anything is added to `package.json`.
+Accepted for research purposes only. No in-profile TUI is installed, vendored, or depended on in this slice; agentProlog runs headless. The chosen TUI is consumed in a later slice, re-verifying command interoperability against the then-current release before anything is added to `package.json`.
+
+Scope note: `pnpm run dev` launches agentProlog's own minimal terminal frontend (`packages/tui`) directly over the canonical Prolog sidecar — a development adapter, not the ADR's decision target. This ADR governs the TUI that composes into a DSH profile alongside the agentProlog plugin.
 
 ## Context
 

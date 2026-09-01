@@ -5,20 +5,24 @@ AgentProlog is a symbolic coding-agent layer composed into DeepSeek Harness (DSH
 ## Composition
 
 ```text
-DSH runtime (dsh-base profile)
-   |
+DSH runtime (dsh-base profile)             agentProlog TUI (packages/tui, pnpm run dev)
+   |                                        |
    +-- agentProlog plugin (packages/agentprolog)
    |       |
    |       +-- ModeRouter          one authoritative backend decision per turn
    |       +-- mode commands       /direct  /symbolic  /symbolic-recursive
    |       +-- adapters            mode -> canonical sidecar request shaping
+   |       +-- skills              skill roots -> confined runtime catalog
    |       +-- PrologAgentFactory  the single DSH AgentFactory
    |       +-- SidecarTransport    persistent NDJSON/stdio bridge
    |
    +-- Prolog sidecar (prolog/agentprolog_dsh_sidecar.pl)
            |
-           +-- public prolog-rlm APIs (rlm_conversation, rlm_completion, rlm_chain)
+           +-- public prolog-rlm APIs (rlm_conversation, rlm_completion,
+               rlm_skill, rlm_chain)
 ```
+
+The TUI and the DSH plugin are two frontends over one canonical runtime: both drive the same sidecar protocol, ModeRouter, and skill catalog. The TUI owns presentation only — it never re-implements turn, mode, or skill semantics.
 
 ## Module map
 
@@ -30,6 +34,7 @@ DSH runtime (dsh-base profile)
 | `src/adapters.ts` | Typed boundary to the sidecar: canonical turn payloads per mode, structured failure classification, recursion-ceiling forwarding. |
 | `src/bridge.ts` | Request/response correlation, cancelled/error rejection, monotonic runtime events. |
 | `src/sidecar.ts` | Process lifecycle for the persistent Prolog sidecar; fail-closed on exit, malformed output, and protocol mismatch. |
+| `src/skills.ts` (plugin) | Skill roots → the runtime's confined `rlm_skill` catalog (`skill.load`/`skill.list`/`skill.reset` ops); offered to every turn via the completion `skill_catalog` option. |
 | `src/agent-factory.ts` | DSH `Agent`/`AgentFactory` backed by the sidecar; one DSH user turn maps to one canonical Prolog-RLM trajectory. |
 | `src/plugin.ts` | Cordis `apply()`: compatibility pin check, sidecar startup, factory registration, command registration, service provisioning, cleanup. |
 | `src/protocol.ts` | NDJSON frame vocabulary and validation shared with the sidecar. |
@@ -52,7 +57,7 @@ user turn (DSH)
 
 ## Termination controls
 
-Recursion and iteration ceilings are owned by Prolog-RLM's budget system and enforced inside the runtime; the sidecar forwards explicit ceilings (`max_recursion_depth`, `max_iterations`, and friends) from the plugin payload and rejects non-conforming values before any provider call. Direct mode makes symbolic recursion structurally impossible (no `rlm` capability, depth 0). Cancellation flows DSH `agent.cancel()` -> `session.cancel` -> the Prolog cancellation token, and settles the turn as aborted — it never leaves a zombie trajectory.
+Recursion and iteration ceilings are owned by Prolog-RLM's budget system and enforced inside the runtime; the sidecar forwards explicit ceilings (`max_recursion_depth`, `max_iterations`, and friends) from the plugin payload and rejects non-conforming values before any provider call. Direct mode makes symbolic recursion structurally impossible (no `rlm` capability, depth 0). Cancellation flows DSH `agent.cancel()` (or the TUI's Ctrl+C) -> `session.cancel` -> the Prolog cancellation token, and settles the turn as aborted — it never leaves a zombie trajectory.
 
 ## Failure semantics
 

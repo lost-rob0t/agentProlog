@@ -16,14 +16,43 @@ AgentProlog makes [Prolog-RLM](https://github.com/lost-rob0t/prolog-rlm) the can
                 agentProlog DSH plugin
                 packages/agentprolog
                              |
-                       mode router
-                     /     |      \
-                direct  symbolic  symbolic-recursive
-                    \       |       /
+        +--------------------+--------------------+
+        |          mode router + skills           |
+        |  /direct  /symbolic  /symbolic-recursive|
+        +--------------------+--------------------+
+                             |
                      Prolog sidecar (NDJSON/stdio)
                              |
                      public prolog-rlm APIs
+                             ^
+                             |
+                agentProlog TUI (packages/tui)
+                pnpm run dev — terminal frontend over
+                the same canonical protocol
 ```
+
+## Quick start: the terminal frontend
+
+```sh
+direnv allow        # or: nix develop
+pnpm run dev
+```
+
+This builds the workspace and launches the AgentProlog TUI over the Nix-pinned Prolog-RLM sidecar — the same canonical runtime, bridge protocol, mode router, and skill catalog the DSH plugin uses. The TUI is a frontend, not a second runtime.
+
+| Input | Effect |
+| --- | --- |
+| `/direct` `/symbolic` `/symbolic-recursive` | Switch the session's reasoning mode (canonical router transition) |
+| `/mode [name]` | Show or set the reasoning mode |
+| `/skills` | List skills loaded into the runtime catalog |
+| `/clear` `/quit` | Clear the transcript / exit |
+| any other text | Submitted as one canonical Prolog-RLM turn in the current mode |
+
+Ctrl+C cancels a running turn (`session.cancel` → the Prolog cancellation token); Ctrl+C or Ctrl+D on idle exits. Model selection comes from `AGENTPROLOG_MODEL` or `OPENROUTER_MODEL`; a live turn additionally needs an OpenRouter-compatible key in the environment (`.env` is loaded automatically).
+
+### Skills
+
+Skills are prolog-rlm's confined `SKILL.md` packages, loaded into the runtime catalog and offered to every turn as prompt units — they never gain execution authority. The TUI loads `AGENTPROLOG_SKILLS` roots (colon-separated, `external`) plus `./skills` (project) at startup; the DSH plugin takes them via config `skills.roots`. `/skills` lists what is loaded.
 
 ## Reasoning modes
 
@@ -84,7 +113,8 @@ A live model turn additionally needs an OpenRouter-compatible key in the environ
 ## Repository layout
 
 ```text
-packages/agentprolog/    the DSH plugin (TypeScript): router, commands, adapters, bridge, transport
+packages/agentprolog/    the DSH plugin (TypeScript): router, commands, adapters, bridge, transport, skills
+packages/tui/            the terminal frontend (pnpm run dev) over the same canonical protocol
 prolog/                  the persistent Prolog sidecar (public prolog-rlm APIs only)
 profiles/                official DSH profile overlay (disables stock agent-loop, mounts the plugin)
 flake.nix                toolchain, sidecar package, keyless checks
