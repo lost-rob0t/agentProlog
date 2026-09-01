@@ -1,4 +1,7 @@
 {
   "files": [],
-  "references": [{ "path": "packages/agentprolog" }]
+  "references": [
+    { "path": "packages/agentprolog" },
+    { "path": "packages/tui" }
+  ]
 }

@@ -1,0 +1,35 @@
+{
+  "name": "@agentprolog/tui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AgentProlog terminal frontend over the canonical Prolog-RLM sidecar",
+  "license": "MIT",
+  "bin": {
+    "agentprolog-tui": "./dist/main.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "vitest run",
+    "dev": "node dist/main.js"
+  },
+  "dependencies": {
+    "@agentprolog/dsh": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  }
+}
