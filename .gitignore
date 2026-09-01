@@ -1,0 +1,9 @@
+node_modules/
+dist/
+lib/
+*.tsbuildinfo
+.env
+result
+result-*
+.direnv/
+vitest.*
