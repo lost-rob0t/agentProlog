@@ -1,0 +1,24 @@
+# AgentProlog overlay for the official DeepSeek Harness web/headless profiles.
+# Apply after the shipped bundle layers with `dsh ... --patch <this-file>`.
+#
+# The core integration changes exactly one upstream semantic owner:
+# AgentFactory. The stock agent-loop row is disabled so exactly one factory is
+# authoritative, and this plugin is mounted with the Nix-pinned sidecar and
+# compatibility pins. The command is provided by this repository's flake:
+#   AGENTPROLOG_DSH_PLUGIN=<path or package name of packages/agentprolog>
+#   AGENTPROLOG_SIDECAR=$(nix build .#agentprolog-sidecar --print-out-paths)/bin/agentprolog-sidecar
+
+- id: agent-loop
+  disabled: true
+
+- insert:
+    - id: agentprolog-agent-factory
+      name: !!js process.env.AGENTPROLOG_DSH_PLUGIN
+      inject: [agents, sessions, commands]
+      config:
+        command: !!js process.env.AGENTPROLOG_SIDECAR
+        harness:
+          version: 0.1.1-rc.2
+          revision: b150a551b8d465e31e418e1b2eaf5e79bbb7d28e
+        defaults:
+          maxRecursionDepth: 2

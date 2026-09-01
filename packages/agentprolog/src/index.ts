@@ -1,0 +1,11 @@
+export { apply, SERVICE_NAME, name, type AgentPrologPluginConfig, type AgentPrologService } from "./plugin.js";
+export { PrologAgentFactory, PrologBackedAgent } from "./agent-factory.js";
+export { ModeRouter, type TurnRequest, type TurnOutcome, type ModeChangeEvent, type TurnRecord } from "./router.js";
+export { executeTurnViaBridge, TurnExecutionError, type AdapterOptions } from "./adapters.js";
+export { modeCommandDefinitions } from "./commands.js";
+export { SidecarTransport, type SidecarOptions } from "./sidecar.js";
+export { Bridge } from "./bridge.js";
+export { PROTOCOL_VERSION, validateRequest, validateRuntimeEvent } from "./protocol.js";
+export { ProtocolError, ModeError } from "./errors.js";
+export { assertHarnessCompatibility, SUPPORTED_HARNESS } from "./compatibility.js";
+export { AGENTPROLOG_MODES, DEFAULT_MODE, isMode, parseMode, modeLabel, type AgentPrologMode } from "./modes.js";

@@ -6,4 +6,3 @@ lib/
 result
 result-*
 .direnv/
-vitest.*
