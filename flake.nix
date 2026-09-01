@@ -53,5 +53,17 @@
           agentProlog | grep -F "AgentProlog runtime ready"
           touch "$out"
         '';
+
+        checks.headless-workflow = pkgs.runCommand "agentprolog-headless-workflow" {
+          nativeBuildInputs = [ upstream ];
+        } ''
+          export HOME="$TMPDIR/home"
+          mkdir -p "$HOME"
+          cp -R ${./prolog} ./prolog
+          cp -R ${./test} ./test
+          chmod -R u+w ./prolog ./test
+          ${upstreamSwipl} -q -g "load_files('test/headless_workflow_test.pl',[silent(true)]),run_tests(agentprolog_headless),halt"
+          touch "$out"
+        '';
       });
 }
