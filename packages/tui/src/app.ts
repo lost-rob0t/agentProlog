@@ -69,10 +69,16 @@ export class App {
     });
     this.rl = rl;
     rl.on("line", line => {
-      void this.handleLine(line);
+      // Lines run strictly in arrival order, so a quit never overtakes a
+      // still-settling command reply.
+      this.queue = this.queue.then(() => this.handleLine(line)).catch(() => undefined);
     });
     rl.on("close", () => {
-      void this.stop("input closed");
+      this.closeRequested = true;
+      if (this.turnActive) void this.cancelTurn();
+      void this.queue.then(() => {
+        if (!this.stopping) return this.stop("input closed");
+      });
     });
     rl.on("SIGINT", () => {
       void this.handleInterrupt();
@@ -81,6 +87,8 @@ export class App {
   }
 
   private onQuit: () => void = () => undefined;
+  private closeRequested = false;
+  private queue: Promise<void> = Promise.resolve();
 
   private reprompt(): void {
     if (!this.rl || this.turnActive) return;

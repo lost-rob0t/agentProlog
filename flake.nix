@@ -26,6 +26,9 @@
         # Persistent Prolog sidecar consumed by the DSH plugin as
         # config.command. The wrapper pins both the SWI-Prolog build and the
         # prolog-rlm pack closure, so no host swipl installation is used.
+        # prolog-rlm's skills/core tree ships inside the pack because
+        # rlm_skill's default catalog resolves relative to its own source
+        # location; without it the runtime's operating skills are absent.
         sidecar = pkgs.stdenvNoCC.mkDerivation {
           pname = "agentprolog-sidecar";
           version = "0.1.0";
@@ -34,14 +37,17 @@
           nativeBuildInputs = [ pkgs.makeWrapper ];
           installPhase = ''
             runHook preInstall
-            mkdir -p "$out/lib/agentprolog" "$out/bin"
+            packRoot="$out/share/swi-prolog/pack"
+            mkdir -p "$packRoot/prolog_rlm" "$out/lib/agentprolog" "$out/bin"
+            cp -r "${prologRlmPack}/prolog_rlm/." "$packRoot/prolog_rlm/"
+            cp -r "${prolog-rlm}/skills" "$packRoot/prolog_rlm/skills"
             cp agentprolog_dsh_sidecar.pl "$out/lib/agentprolog/"
             makeWrapper ${swiProlog}/bin/swipl "$out/bin/agentprolog-sidecar" \
               --add-flags "-q" \
               --add-flags "-s $out/lib/agentprolog/agentprolog_dsh_sidecar.pl" \
               --add-flags "--" \
               --add-flags "stdio" \
-              --prefix SWIPL_PACK_PATH : "${prologRlmPack}"
+              --prefix SWIPL_PACK_PATH : "$packRoot"
             runHook postInstall
           '';
           passthru = {

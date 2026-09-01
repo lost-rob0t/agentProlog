@@ -102,6 +102,15 @@ describe.skipIf(!SIDECAR)("headless sidecar integration (real Prolog process, ke
     const transport = new SidecarTransport({ command: SIDECAR! });
     await transport.start();
 
+    // The sidecar catalog starts from the runtime default: prolog-rlm's core
+    // operating skills ship inside the pack.
+    const initial = (await transport.request({
+      version: 1, request_id: "sk0", session_id: "bridge", operation: "skill.list", payload: {},
+    })) as { payload: { skills: Array<{ name: string }> } };
+    expect(initial.payload.skills.map(skill => skill.name)).toEqual(
+      expect.arrayContaining(["rlm-operate", "rlm-recurse", "rlm-facts", "rlm-constraints"]),
+    );
+
     const loaded = (await transport.request({
       version: 1, request_id: "sk1", session_id: "bridge", operation: "skill.load",
       payload: { roots: [{ source: "project", path: "test/fixtures/skills" }] },
@@ -110,6 +119,8 @@ describe.skipIf(!SIDECAR)("headless sidecar integration (real Prolog process, ke
       name: "demo-skill",
       description: "Demonstrates agentProlog skill loading end to end.",
     });
+    // Project loads merge on top of the core skills instead of replacing them.
+    expect(loaded.payload.skills.map(skill => skill.name)).toContain("rlm-operate");
 
     const listed = (await transport.request({
       version: 1, request_id: "sk2", session_id: "bridge", operation: "skill.list", payload: {},
@@ -118,13 +129,14 @@ describe.skipIf(!SIDECAR)("headless sidecar integration (real Prolog process, ke
 
     const reset = (await transport.request({
       version: 1, request_id: "sk3", session_id: "bridge", operation: "skill.reset", payload: {},
-    })) as { payload: { skills: unknown[] } };
-    expect(reset.payload.skills).toEqual([]);
+    })) as { payload: { skills: Array<{ name: string }> } };
+    expect(reset.payload.skills.map(skill => skill.name)).not.toContain("demo-skill");
+    expect(reset.payload.skills.map(skill => skill.name)).toContain("rlm-operate");
 
     const listedAfterReset = (await transport.request({
       version: 1, request_id: "sk4", session_id: "bridge", operation: "skill.list", payload: {},
-    })) as { payload: { skills: unknown[] } };
-    expect(listedAfterReset.payload.skills).toEqual([]);
+    })) as { payload: { skills: Array<{ name: string }> } };
+    expect(listedAfterReset.payload.skills.map(skill => skill.name)).not.toContain("demo-skill");
 
     await expect(
       transport.request({

@@ -50,8 +50,12 @@ open_runtime :-
     rlm_conversation:conversation_store_open(memory, Outcome),
     require_ok(store_open, Outcome, Store),
     assertz(sidecar_store(Store)),
-    rlm_skill:skill_catalog_empty(EmptyCatalog),
-    assertz(sidecar_skill_catalog(EmptyCatalog)).
+    % The catalog starts from the runtime default (prolog-rlm's core
+    % operating skills when shipped with the pack); loaded project roots
+    % merge on top instead of replacing the core skills.
+    rlm_skill:skill_default_catalog(DefaultOutcome),
+    require_skill_outcome(DefaultOutcome, DefaultCatalog),
+    assertz(sidecar_skill_catalog(DefaultCatalog)).
 
 close_runtime :-
     cancel_all_turns,
@@ -525,10 +529,12 @@ skill_list(Frame) :-
           reply_exception(Frame, skill_list, Error)).
 
 skill_reset(Frame) :-
-    catch(( rlm_skill:skill_catalog_empty(Empty),
+    catch(( rlm_skill:skill_default_catalog(DefaultOutcome),
+            require_skill_outcome(DefaultOutcome, DefaultCatalog),
             retractall(sidecar_skill_catalog(_)),
-            assertz(sidecar_skill_catalog(Empty)),
-            reply_ok(Frame, _{skills:[]}) ),
+            assertz(sidecar_skill_catalog(DefaultCatalog)),
+            catalog_skill_summaries(DefaultCatalog, Summaries),
+            reply_ok(Frame, _{skills:Summaries}) ),
           Error,
           reply_exception(Frame, skill_reset, Error)).
 

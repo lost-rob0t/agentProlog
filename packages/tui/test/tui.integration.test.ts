@@ -61,8 +61,10 @@ describe.skipIf(!SIDECAR)("TUI headless smoke over the real sidecar (keyless)", 
     expect(outputBuffer.text).toContain("◈ Mode: symbolic");
 
     input.write("/skills\n");
-    await new Promise(resolve => setTimeout(resolve, 400));
-    expect(outputBuffer.text).toContain("no skills loaded");
+    await new Promise(resolve => setTimeout(resolve, 600));
+    // The sidecar catalog starts from the runtime default, which ships
+    // prolog-rlm's core operating skills inside the pack.
+    expect(outputBuffer.text).toContain("• rlm-operate");
 
     input.write("/quit\n");
     await quit;
