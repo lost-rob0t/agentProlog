@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  nix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Flake check (pack load, sidecar smoke, mode validation)
+        run: nix flake check --print-build-logs
+      - name: Build sidecar package
+        run: nix build .#agentprolog-sidecar --print-build-logs
+
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Install, build, and test through the nix toolchain
+        run: |
+          nix develop -c bash -c '
+            set -euo pipefail
+            pnpm install --frozen-lockfile
+            pnpm build
+            pnpm test
+          '
