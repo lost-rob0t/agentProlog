@@ -26,7 +26,7 @@ class FakeTransport {
     this.started += 1;
     throw new Error("use startOk in tests");
   }
-  async request(): Promise<Record<string, unknown>> {
+  async request(_frame?: { operation?: string }): Promise<Record<string, unknown>> {
     throw new Error("not wired");
   }
   onEvent(): () => void {
@@ -54,6 +54,12 @@ function fakeTransportFactory() {
   class FakeOkTransport extends FakeTransport {
     override capabilities(): Record<string, unknown> {
       return { modes: true };
+    }
+    override async request(frame: { operation?: string }): Promise<Record<string, unknown>> {
+      if (frame.operation === "skill.load") {
+        return { payload: { loaded: 1, skills: [{ name: "demo-skill", description: "a demo" }] } };
+      }
+      throw new Error(`not wired: ${frame.operation}`);
     }
     override async start(): Promise<unknown> {
       this.started += 1;
@@ -144,6 +150,39 @@ describe("agentProlog DSH plugin", () => {
     await expect(apply(ctx as unknown as never, config(), deps)).rejects.toThrow("use startOk in tests");
     expect(ctx.agents?.factories).toHaveLength(0);
     expect(ctx.services.size).toBe(0);
+  });
+
+  it("loads configured skill roots during startup, fail-closed", async () => {
+    const ctx = makeFakeContext();
+    const { Transport } = fakeTransportFactory();
+    await apply(ctx as unknown as never, config({ skills: { roots: [{ source: "project", path: "skills" }] } }), { Transport });
+    const logs: string[] = [];
+    expect(ctx.services.get("agentprolog")).toBeDefined();
+    void logs;
+
+    const broken = makeFakeContext();
+    class FailingSkillTransport extends FakeTransport {
+      override async request(): Promise<Record<string, unknown>> {
+        throw new Error("skill root missing");
+      }
+      override async start(): Promise<unknown> {
+        this.started += 1;
+        return {
+          version: 1,
+          request_id: "describe-1",
+          session_id: "bridge",
+          status: "ok",
+          payload: { protocol_version: 1, runtime: "prolog-rlm", capabilities: {} },
+        };
+      }
+    }
+    await expect(
+      apply(broken as unknown as never, config({ skills: { roots: [{ source: "external", path: "/missing" }] } }), {
+        Transport: FailingSkillTransport as unknown as typeof SidecarTransport,
+      }),
+    ).rejects.toThrow("skill root missing");
+    expect(broken.services.size).toBe(0);
+    expect(broken.agents?.factories).toHaveLength(0);
   });
 
   it("rejects an invalid configured default mode", async () => {

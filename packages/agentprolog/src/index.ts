@@ -5,7 +5,8 @@ export { executeTurnViaBridge, TurnExecutionError, type AdapterOptions } from ".
 export { modeCommandDefinitions } from "./commands.js";
 export { SidecarTransport, type SidecarOptions } from "./sidecar.js";
 export { Bridge } from "./bridge.js";
-export { PROTOCOL_VERSION, validateRequest, validateRuntimeEvent } from "./protocol.js";
+export { PROTOCOL_VERSION, validateRequest, validateRuntimeEvent, type RequestFrame, type ResponseFrame, type RuntimeEventFrame, type BridgeCapabilities } from "./protocol.js";
 export { ProtocolError, ModeError } from "./errors.js";
 export { assertHarnessCompatibility, SUPPORTED_HARNESS } from "./compatibility.js";
 export { AGENTPROLOG_MODES, DEFAULT_MODE, isMode, parseMode, modeLabel, type AgentPrologMode } from "./modes.js";
+export { loadSkillRoots, listSkills, skillRootsFromEnv, type SkillRoot, type SkillSummary } from "./skills.js";

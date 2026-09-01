@@ -16,6 +16,9 @@ const BASE_OPERATIONS: ReadonlySet<string> = new Set([
   "session.turn",
   "session.cancel",
   "session.inspect",
+  "skill.load",
+  "skill.list",
+  "skill.reset",
 ]);
 
 const EXPERIMENT_OPERATIONS: ReadonlySet<string> = new Set([

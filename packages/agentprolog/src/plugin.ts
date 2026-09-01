@@ -8,6 +8,7 @@ import { PrologAgentFactory } from "./agent-factory.js";
 import { DEFAULT_MODE, parseMode, type AgentPrologMode } from "./modes.js";
 import { ModeRouter } from "./router.js";
 import { SidecarTransport } from "./sidecar.js";
+import { loadSkillRoots, type SkillRoot } from "./skills.js";
 
 export const name = "agentprolog";
 export const inject = ["agents", "sessions", "commands"] as const;
@@ -20,6 +21,10 @@ export interface AgentPrologDefaults {
   readonly maxRecursionDepth?: number;
 }
 
+export interface SkillRootsConfig {
+  readonly roots: readonly SkillRoot[];
+}
+
 export interface AgentPrologPluginConfig {
   /** Nix-pinned sidecar command, e.g. the flake's agentprolog-sidecar wrapper. */
   readonly command: string;
@@ -29,6 +34,8 @@ export interface AgentPrologPluginConfig {
   readonly shutdownMs?: number;
   readonly harness: HarnessIdentity;
   readonly defaults?: AgentPrologDefaults;
+  /** Skill roots admitted into the runtime catalog before any turn runs. */
+  readonly skills?: SkillRootsConfig;
 }
 
 export interface AgentPrologService {
@@ -109,6 +116,14 @@ export async function apply(
 
   try {
     const description = await transport.start();
+
+    // Fail-closed skill admission: an explicit but invalid skills config
+    // aborts startup instead of silently running without skills.
+    if (config.skills?.roots?.length) {
+      const skills = await loadSkillRoots(transport, config.skills.roots);
+      logger.info(`agentprolog skills loaded count=${skills.length}`);
+    }
+
     const service: AgentPrologService = {
       request: frame => transport.request(frame),
       describe: () => description,

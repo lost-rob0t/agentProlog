@@ -25,6 +25,7 @@ cancellation, and malformed frames fail closed; nothing silently restarts.
 :- use_module(library(rlm_completion), []).
 :- use_module(library(rlm_conversation), []).
 :- use_module(library(rlm_conversation_runtime), []).
+:- use_module(library(rlm_skill), []).
 
 :- dynamic sidecar_store/1.
 :- dynamic sidecar_session/2.
@@ -32,6 +33,7 @@ cancellation, and malformed frames fail closed; nothing silently restarts.
 :- dynamic sidecar_turn/3.
 :- dynamic sidecar_cancelled/2.
 :- dynamic sidecar_event_seq/3.
+:- dynamic sidecar_skill_catalog/1.
 
 :- initialization(main, main).
 
@@ -47,7 +49,9 @@ main(_) :-
 open_runtime :-
     rlm_conversation:conversation_store_open(memory, Outcome),
     require_ok(store_open, Outcome, Store),
-    assertz(sidecar_store(Store)).
+    assertz(sidecar_store(Store)),
+    rlm_skill:skill_catalog_empty(EmptyCatalog),
+    assertz(sidecar_skill_catalog(EmptyCatalog)).
 
 close_runtime :-
     cancel_all_turns,
@@ -59,7 +63,8 @@ close_runtime :-
     retractall(sidecar_mode(_, _)),
     retractall(sidecar_turn(_, _, _)),
     retractall(sidecar_cancelled(_, _)),
-    retractall(sidecar_event_seq(_, _, _)).
+    retractall(sidecar_event_seq(_, _, _)),
+    retractall(sidecar_skill_catalog(_)).
 
 request_loop :-
     read_line_to_string(user_input, Line),
@@ -98,7 +103,8 @@ dispatch_operation("runtime.describe", Frame) :- !,
                               cancellation:true,
                               agent_factory:true,
                               evolution:false,
-                              modes:true}}).
+                              modes:true,
+                              skills:true}}).
 dispatch_operation("session.start", Frame) :- !,
     session_start(Frame).
 dispatch_operation("session.mode", Frame) :- !,
@@ -109,6 +115,12 @@ dispatch_operation("session.cancel", Frame) :- !,
     session_cancel(Frame).
 dispatch_operation("session.inspect", Frame) :- !,
     session_inspect(Frame).
+dispatch_operation("skill.load", Frame) :- !,
+    skill_load(Frame).
+dispatch_operation("skill.list", Frame) :- !,
+    skill_list(Frame).
+dispatch_operation("skill.reset", Frame) :- !,
+    skill_reset(Frame).
 dispatch_operation(Operation, Frame) :-
     reply_error(Frame, "unknown_operation",
                 _{message:"operation is not implemented by the AgentProlog core sidecar",
@@ -254,11 +266,55 @@ completion_options(Mode, Payload, Token, Frame, Options) :-
     turn_provider(Payload, Provider, _),
     base_completion_options(Token, Frame, Provider, Base),
     mode_options(Mode, Base, Options0),
+    apply_budget_updates_or_keep(Options0, Payload, Options1),
+    skill_options(Payload, Options1, Options).
+
+apply_budget_updates_or_keep(Options0, Payload, Options) :-
     payload_budget_updates(Payload, Updates),
     (   Updates == none
     ->  Options = Options0
     ;   apply_budget_updates(Options0, Updates, Options)
     ).
+
+%% Skill controls forwarded to the completion supervisor. A non-empty
+%% sidecar catalog replaces the default catalog; empty leaves the runtime
+%% default (core skills) in place.
+skill_options(Payload, Options0, Options) :-
+    skill_catalog_option(CatalogOption),
+    skill_mode_option(Payload, ModeOption),
+    skill_names_option(explicit_skills, Payload, ExplicitOption),
+    skill_names_option(disabled_skills, Payload, DisabledOption),
+    append([CatalogOption, ModeOption, ExplicitOption, DisabledOption], Options0, Options).
+
+skill_catalog_option(skill_catalog(Catalog)) :-
+    sidecar_skill_catalog(Catalog),
+    rlm_skill:skill_catalog_skills(Catalog, [_|_]),
+    !.
+skill_catalog_option([]).
+
+skill_mode_option(Payload, [skill_mode(Mode)]) :-
+    get_dict(skill_mode, Payload, Raw),
+    Raw \== null,
+    !,
+    (   member(Raw, ["on", "off"])
+    ->  atom_string(Mode, Raw)
+    ;   throw(error(invalid_skill_mode(Raw), _))
+    ).
+skill_mode_option(_, []).
+
+skill_names_option(Key, Payload, [Key=Names]) :-
+    get_dict(Key, Payload, Raw),
+    Raw \== null,
+    !,
+    (   is_list(Raw),
+        maplist(skill_name_string, Raw, Names)
+    ->  true
+    ;   throw(error(invalid_skill_names(Key, Raw), _))
+    ).
+skill_names_option(_, _, []).
+
+skill_name_string(Name, Name) :- string(Name), Name \== "", !.
+skill_name_string(Name, _) :- throw(error(invalid_skill_name(Name), _)).
 
 mode_options("direct", Base, Options) :- !,
     append(Base,
@@ -417,6 +473,84 @@ session_inspect(Frame) :-
         )
     ;   reply_error(Frame, "session_not_found", _{message:"unknown session"})
     ).
+
+%% Skill loading: roots are admitted into one sidecar-level catalog that is
+%% offered to every canonical turn through the completion skill_catalog
+%% option. Loading is confined by rlm_skill's bounded-package rules.
+skill_load(Frame) :-
+    catch(skill_load_(Frame),
+          Error,
+          reply_exception(Frame, skill_load, Error)).
+
+skill_load_(Frame) :-
+    payload_dict(Frame, Payload),
+    (   get_dict(roots, Payload, Roots0), is_list(Roots0)
+    ->  true
+    ;   throw(error(invalid_payload_field(roots), _))
+    ),
+    maplist(normalize_skill_root, Roots0, Roots),
+    sidecar_skill_catalog(Catalog0),
+    (   Roots == []
+    ->  catalog_skill_summaries(Catalog0, Summaries),
+        length(Summaries, Count),
+        reply_ok(Frame, _{loaded:Count, skills:Summaries})
+    ;   rlm_skill:skill_catalog_load(Roots, [], Outcome),
+        require_skill_outcome(Outcome, Loaded),
+        rlm_skill:skill_catalog_merge(Catalog0, Loaded, MergeOutcome),
+        require_skill_outcome(MergeOutcome, Merged),
+        retractall(sidecar_skill_catalog(_)),
+        assertz(sidecar_skill_catalog(Merged)),
+        catalog_skill_summaries(Merged, Summaries),
+        length(Summaries, Count),
+        reply_ok(Frame, _{loaded:Count, skills:Summaries})
+    ).
+
+normalize_skill_root(Root0, Root) :-
+    (   is_dict(Root0),
+        get_dict(path, Root0, Path), string(Path), Path \== ""
+    ->  true
+    ;   throw(error(invalid_skill_root(Root0), _))
+    ),
+    (   get_dict(source, Root0, Source0), string(Source0), Source0 \== ""
+    ->  atom_string(Source, Source0)
+    ;   Source = external
+    ),
+    Root = skill_root(Source, Path).
+
+skill_list(Frame) :-
+    catch(( sidecar_skill_catalog(Catalog),
+            catalog_skill_summaries(Catalog, Summaries),
+            reply_ok(Frame, _{skills:Summaries}) ),
+          Error,
+          reply_exception(Frame, skill_list, Error)).
+
+skill_reset(Frame) :-
+    catch(( rlm_skill:skill_catalog_empty(Empty),
+            retractall(sidecar_skill_catalog(_)),
+            assertz(sidecar_skill_catalog(Empty)),
+            reply_ok(Frame, _{skills:[]}) ),
+          Error,
+          reply_exception(Frame, skill_reset, Error)).
+
+require_skill_outcome(ok(Value), Value) :- !.
+require_skill_outcome(error(Error), _) :-
+    throw(error(skill_runtime_error(Error), _)).
+
+catalog_skill_summaries(Catalog, Summaries) :-
+    rlm_skill:skill_catalog_skills(Catalog, Skills),
+    maplist(skill_summary, Skills, Summaries).
+
+skill_summary(Skill, Summary) :-
+    json_text(Skill.name, Name),
+    (   get_dict(description, Skill, Description)
+    ->  json_text(Description, DescriptionText)
+    ;   DescriptionText = ""
+    ),
+    Summary = _{name:Name, description:DescriptionText}.
+
+json_text(Value, Text) :- atom(Value), !, atom_string(Value, Text).
+json_text(Value, Value) :- string(Value), !.
+json_text(Value, _) :- throw(error(invalid_text_value(Value), _)).
 
 emit_event(SessionId, RunId, Event, Data) :-
     next_event_sequence(SessionId, RunId, Sequence),

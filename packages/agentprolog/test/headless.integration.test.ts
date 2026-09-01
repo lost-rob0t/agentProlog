@@ -97,4 +97,41 @@ describe.skipIf(!SIDECAR)("headless sidecar integration (real Prolog process, ke
     expect(cancel.payload).toMatchObject({ accepted: false, active_turns: 0 });
     await transport.stop("test end");
   }, 30000);
+
+  it("loads, lists, and resets skills from a fixture root (keyless)", async () => {
+    const transport = new SidecarTransport({ command: SIDECAR! });
+    await transport.start();
+
+    const loaded = (await transport.request({
+      version: 1, request_id: "sk1", session_id: "bridge", operation: "skill.load",
+      payload: { roots: [{ source: "project", path: "test/fixtures/skills" }] },
+    })) as { payload: { loaded: number; skills: Array<{ name: string; description: string }> } };
+    expect(loaded.payload.skills).toContainEqual({
+      name: "demo-skill",
+      description: "Demonstrates agentProlog skill loading end to end.",
+    });
+
+    const listed = (await transport.request({
+      version: 1, request_id: "sk2", session_id: "bridge", operation: "skill.list", payload: {},
+    })) as { payload: { skills: Array<{ name: string }> } };
+    expect(listed.payload.skills.map(skill => skill.name)).toContain("demo-skill");
+
+    const reset = (await transport.request({
+      version: 1, request_id: "sk3", session_id: "bridge", operation: "skill.reset", payload: {},
+    })) as { payload: { skills: unknown[] } };
+    expect(reset.payload.skills).toEqual([]);
+
+    const listedAfterReset = (await transport.request({
+      version: 1, request_id: "sk4", session_id: "bridge", operation: "skill.list", payload: {},
+    })) as { payload: { skills: unknown[] } };
+    expect(listedAfterReset.payload.skills).toEqual([]);
+
+    await expect(
+      transport.request({
+        version: 1, request_id: "sk5", session_id: "bridge", operation: "skill.load",
+        payload: { roots: [{ source: "external", path: "" }] },
+      }),
+    ).rejects.toMatchObject({ code: "runtime_error", runtimeCode: "runtime_exception" });
+    await transport.stop("test end");
+  }, 30000);
 });
