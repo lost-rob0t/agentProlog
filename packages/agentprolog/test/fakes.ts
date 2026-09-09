@@ -31,6 +31,7 @@ export interface FakeSession {
   options?: unknown;
   append: (type: string, data: unknown, options?: unknown) => { type: string; data: unknown };
   snapshotEvents: () => readonly FakeSessionEvent[];
+  ownEvents: () => readonly FakeSessionEvent[];
 }
 
 export interface FakeContextOptions {
@@ -66,6 +67,9 @@ export function makeFakeSession(id: string): FakeSession {
       return event;
     },
     snapshotEvents() {
+      return Object.freeze([...session.events]);
+    },
+    ownEvents() {
       return Object.freeze([...session.events]);
     },
   };
