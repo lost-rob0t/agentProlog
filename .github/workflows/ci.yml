@@ -20,9 +20,13 @@ jobs:
         run: nix build .#agentprolog-sidecar --print-build-logs
 
   node:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
       - uses: DeterminateSystems/nix-installer-action@main
       - name: Resolve fixed Harness lockfile, build, and test through the nix toolchain
         run: |
@@ -32,10 +36,16 @@ jobs:
             pnpm build
             pnpm test
           '
-      - name: Export regenerated pnpm lockfile
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: resolved-pnpm-lock
-          path: pnpm-lock.yaml
-          if-no-files-found: error
+      - name: Commit regenerated pnpm lockfile
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pnpm-lock.yaml
+          if git diff --cached --quiet; then
+            echo "pnpm-lock.yaml already current"
+          else
+            git commit -m "security: lock fixed DeepSeek Harness release"
+            git push origin HEAD:${{ github.head_ref }}
+          fi
