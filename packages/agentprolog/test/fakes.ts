@@ -18,12 +18,19 @@ export interface FakeSessionService {
   readonly sessions: Map<string, FakeSession>;
 }
 
+export interface FakeSessionEvent {
+  readonly type: string;
+  readonly data: unknown;
+  readonly seq: number;
+}
+
 export interface FakeSession {
   readonly id: string;
   readonly header: { seedLength: number };
-  readonly events: Array<{ type: string; data: unknown; seq: number }>;
+  readonly events: FakeSessionEvent[];
   options?: unknown;
   append: (type: string, data: unknown, options?: unknown) => { type: string; data: unknown };
+  snapshotEvents: () => readonly FakeSessionEvent[];
 }
 
 export interface FakeContextOptions {
@@ -57,6 +64,9 @@ export function makeFakeSession(id: string): FakeSession {
       const event = { type, data, seq };
       session.events.push(event);
       return event;
+    },
+    snapshotEvents() {
+      return Object.freeze([...session.events]);
     },
   };
   return session;
