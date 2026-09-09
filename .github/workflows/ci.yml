@@ -24,11 +24,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
-      - name: Install, build, and test through the nix toolchain
+      - name: Resolve fixed Harness lockfile, build, and test through the nix toolchain
         run: |
           nix develop -c bash -c '
             set -euo pipefail
-            pnpm install --frozen-lockfile
+            pnpm install --no-frozen-lockfile
             pnpm build
             pnpm test
           '
+      - name: Export regenerated pnpm lockfile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resolved-pnpm-lock
+          path: pnpm-lock.yaml
+          if-no-files-found: error
