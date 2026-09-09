@@ -90,7 +90,7 @@ export class PrologBackedAgent {
     this.scope = createScope(ctx, this);
     this.ctx = this.scope.ctx.extend({ agent: this });
     this.dispatch = agentEvents(ctx, this);
-    this.lastTurn = session.events.findLast?.(event => event.type === "turn/start")?.data?.turn ?? 0;
+    this.lastTurn = session.snapshotEvents().findLast(event => event.type === "turn/start")?.data?.turn ?? 0;
   }
 
   get status(): "idle" | "running" {
