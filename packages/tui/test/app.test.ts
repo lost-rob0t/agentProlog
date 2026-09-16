@@ -12,6 +12,7 @@ interface Harness {
   readonly stopped: string[];
   respondTo: (requestId: string, overrides: Partial<{ status: string; text: string; skills: Array<{ name: string; description: string }>; error: { code: string; message: string } }>) => void;
   respondLast: (overrides?: Partial<{ status: string; text: string; skills: Array<{ name: string; description: string }>; error: { code: string; message: string } }>) => void;
+  emitEvent: (event: string, sequence: number, data?: Record<string, unknown>) => void;
   quit: Promise<void>;
 }
 
@@ -59,6 +60,17 @@ function makeHarness(): Harness {
     respondTo(sent[sent.length - 1]!.request_id, overrides);
   };
 
+  const emitEvent: Harness["emitEvent"] = (event, sequence, data = {}) => {
+    bridge.receive({
+      version: PROTOCOL_VERSION,
+      session_id: "s1",
+      run_id: sent.find(frame => frame.operation === "session.turn")?.request_id ?? "turn",
+      event,
+      sequence,
+      data,
+    });
+  };
+
   const router = new ModeRouter({
     execute: (request, mode) =>
       // Exercise the real adapter so error classification matches production.
@@ -92,7 +104,7 @@ function makeHarness(): Harness {
   });
   app.run(() => quitResolve());
 
-  return { app, output: outputBuffer, sent, stopped, respondTo, respondLast, quit };
+  return { app, output: outputBuffer, sent, stopped, respondTo, respondLast, emitEvent, quit };
 }
 
 async function until(predicate: () => boolean): Promise<void> {
@@ -141,6 +153,24 @@ describe("TUI app", () => {
     await pending;
     expect(output.text).toContain("⏺ here is the plan");
     expect(output.text).toContain("mode: symbolic");
+    await app.handleLine("/quit");
+    await quit;
+  });
+
+  it("keeps planner deltas internal and prints the final answer once", async () => {
+    const { app, output, sent, emitEvent, respondLast, quit } = makeHarness();
+    const pending = app.handleLine("answer directly");
+    await until(() => sent.some(frame => frame.operation === "session.turn"));
+    emitEvent("turn_started", 0);
+    emitEvent("message_started", 1, { operation: "planner", message_id: "planner:1" });
+    emitEvent("text_delta", 2, { operation: "planner", message_id: "planner:1", delta: '{"mode":"direct","answer":"Hello"}' });
+    emitEvent("message_completed", 3, { operation: "planner", message_id: "planner:1" });
+    expect(output.text).not.toContain('{"mode":"direct"');
+    expect(output.text).not.toContain("⏺ Hello");
+    respondLast({ text: "Hello" });
+    await pending;
+    expect(output.text.match(/⏺ Hello/g)).toHaveLength(1);
+    expect(output.text).not.toContain('{"mode":"direct"');
     await app.handleLine("/quit");
     await quit;
   });

@@ -26,6 +26,7 @@ cancellation, and malformed frames fail closed; nothing silently restarts.
 :- use_module(library(rlm_conversation), []).
 :- use_module(library(rlm_conversation_runtime), []).
 :- use_module(library(rlm_skill), []).
+:- use_module(library(prolog_agent_ui_facade), []).
 
 :- dynamic sidecar_store/1.
 :- dynamic sidecar_session/2.
@@ -226,7 +227,9 @@ run_turn_guarded(Frame, Conversation, Token, Mode) :-
           Error,
           Outcome = exception(Error)),
     (   sidecar_cancelled(Frame.session_id, Frame.request_id)
-    ->  reply_status(Frame, "cancelled", _{},
+    ->  emit_event(Frame.session_id, Frame.request_id, "turn_finished",
+                   _{status:"cancelled", mode:Mode}),
+        reply_status(Frame, "cancelled", _{},
                      _{code:"cancelled", message:"canonical Prolog-RLM turn cancelled"})
     ;   Outcome = ok(Turn)
     ->  turn_payload(Turn, Model, Mode, Payload),
@@ -238,8 +241,7 @@ run_turn_guarded(Frame, Conversation, Token, Mode) :-
         emit_event(Frame.session_id, Frame.request_id, "turn_finished", _{status:"error", mode:Mode, code:Code}),
         reply_error(Frame, Code, _{message:Text})
     ;   Outcome = exception(Error)
-    ->  safe_term_string(Error, Text),
-        emit_event(Frame.session_id, Frame.request_id, "turn_finished", _{status:"error", mode:Mode, code:"runtime_exception"}),
+    ->  emit_event(Frame.session_id, Frame.request_id, "turn_finished", _{status:"error", mode:Mode, code:"runtime_exception"}),
         reply_exception(Frame, turn, Error)
     ;   safe_term_string(Outcome, Text),
         reply_error(Frame, "invalid_turn_outcome", _{message:Text})
@@ -248,7 +250,7 @@ run_turn_guarded(Frame, Conversation, Token, Mode) :-
 run_turn_call(Frame, Conversation, Token, Mode, Outcome, Model) :-
     payload_dict(Frame, Payload),
     require_payload_text(Payload, text, Text),
-    turn_provider(Payload, Provider, Model),
+    turn_provider(Payload, _Provider, Model),
     completion_options(Mode, Payload, Token, Frame, CompletionOptions),
     rlm_conversation_runtime:conversation_turn(
         Conversation,
@@ -260,7 +262,40 @@ run_turn_call(Frame, Conversation, Token, Mode, Outcome, Model) :-
 base_completion_options(Token, Frame, Provider, [provider(Provider),
                                                  provider_name(openrouter),
                                                  cancel_token(Token),
-                                                 session_id(Frame.session_id)]).
+                                                 session_id(Frame.session_id),
+                                                 text_delta_handler(
+                                                     agentprolog_dsh_sidecar:stream_to_event(
+                                                         Frame.session_id,
+                                                         Frame.request_id))]).
+
+%% Keep every model call's raw text attributed to its completion CallRef.
+%% Planner text is internal protocol text, not the user-facing answer.
+stream_to_event(SessionId, RunId, Message) :-
+    CallRef = Message.call,
+    prolog_agent_ui_facade:ui_stream_handler(
+        RunId,
+        agentprolog_dsh_sidecar:canonical_stream_event(SessionId, RunId, CallRef),
+        Message).
+
+canonical_stream_event(SessionId, RunId, CallRef,
+                       agent_event(message_started, MessageId, Role)) :- !,
+    stream_event_data(CallRef, MessageId, _{role:Role}, Data),
+    emit_event(SessionId, RunId, "message_started", Data).
+canonical_stream_event(SessionId, RunId, CallRef,
+                       agent_event(model_delta, MessageId, Text)) :- !,
+    stream_event_data(CallRef, MessageId, _{delta:Text}, Data),
+    emit_event(SessionId, RunId, "text_delta", Data).
+canonical_stream_event(SessionId, RunId, CallRef,
+                       agent_event(message_completed, MessageId)) :- !,
+    stream_event_data(CallRef, MessageId, _{}, Data),
+    emit_event(SessionId, RunId, "message_completed", Data).
+
+stream_event_data(CallRef, MessageId, Extra, Data) :-
+    put_dict(_{message_id:MessageId,
+               operation:CallRef.operation,
+               depth:CallRef.depth,
+               call_seq:CallRef.seq},
+             Extra, Data).
 
 %% Mode-specific capabilities, child capabilities, and budgets. These are the
 %% explicit termination controls: recursion depth 0 and no `rlm` capability
@@ -330,15 +365,17 @@ mode_options("symbolic", Base, Options) :- !,
     % Runtime defaults: root supervisor may select typed plans; child plans
     % are model-only, so recursion stays at depth 1.
     Options = Base.
-mode_options("symbolic-recursive", _Base, Options) :- !,
+mode_options("symbolic-recursive", Base, Options) :- !,
     % Child plans may select symbolic work themselves; the depth ceiling
     % below (and prolog-rlm's own budget validation) bounds the recursion.
-    Options = [child_capabilities([rlm,
-                                   model(openrouter),
-                                   context(peek),
-                                   context(slice),
-                                   context(search)]),
-               budget(_{max_recursion_depth:2})].
+    append(Base,
+           [child_capabilities([rlm,
+                                model(openrouter),
+                                context(peek),
+                                context(slice),
+                                context(search)]),
+            budget(_{max_recursion_depth:2})],
+           Options).
 
 %% Explicit budget updates forwarded from the plugin payload. Absent keys are
 %% skipped; present but non-conforming values are rejected before any

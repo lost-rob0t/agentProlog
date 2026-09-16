@@ -1,0 +1,6 @@
+/facts.kb
+/verify.pl
+/result.json
+/.facts.lock
+/runs/
+/sessions/

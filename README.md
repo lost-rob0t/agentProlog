@@ -103,12 +103,18 @@ A live model turn additionally needs an OpenRouter-compatible key in the environ
 
 `ModeRouter` is owned by the plugin instance (one per composed profile) and keys mode state by DSH session id. Concurrent sessions cannot observe or leak each other's modes; disposing an agent forgets its state. There is no process-global singleton. Mode changes and turn settlements are emitted as `agentprolog/mode/change` and `agentprolog/turn/settled` events plus structured log lines (`mode`, `session`, `backend`, `duration`, `cancelled`) — never prompts or secrets.
 
+## Model text events
+
+The sidecar uses Prolog-RLM's trusted `text_delta_handler` for every model call. It emits ordered `message_started`, `text_delta`, and `message_completed` NDJSON events between `turn_started` and `turn_finished`. Each event has a `run_id`, monotonic `sequence`, and `data.message_id`; model events also carry `operation`, `depth`, and `call_seq` so callers can distinguish planner text from other model calls. A cancelled or failed stream may end after a partial delta without `message_completed`; the final turn response remains authoritative. The DSH plugin forwards these events on `agentprolog/runtime/event` for observers.
+
+The TUI and DSH assistant message display the validated final answer once. Planner deltas can contain protocol JSON, including in direct mode, so they are not rendered as assistant text. Incremental answer display needs an upstream projection that identifies user-facing answer text separately from planner and child model output.
+
 ## Known limitations
 
 - Session resume, steer/inject, and maintenance operations are not implemented yet and fail closed.
 - The canonical sidecar runtime currently speaks to an OpenRouter-compatible provider (`defaults.model` selects the model); DSH-side provider selection applies to DSH surfaces.
 - DSH compatibility is pinned fail-closed to `0.1.1-rc.2` (see `packages/agentprolog/src/compatibility.ts`); bump both sides together with the flake's prolog-rlm pin.
-- No TUI ships in this repository; the recommendation and integration plan live in [docs/adr/0001-dsh-tui-selection.md](docs/adr/0001-dsh-tui-selection.md).
+- The built-in TUI presents final answers; the optional DSH TUI selection is documented in [docs/adr/0001-dsh-tui-selection.md](docs/adr/0001-dsh-tui-selection.md).
 
 ## Repository layout
 
