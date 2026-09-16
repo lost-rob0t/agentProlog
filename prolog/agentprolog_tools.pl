@@ -13,6 +13,8 @@ The host must prevent hostile concurrent filesystem namespace mutation.
 :- use_module(library(filesex)).
 :- use_module(library(readutil)).
 :- use_module(library(uuid)).
+:- use_module(library(rlm_project_source),[extension_language/2]).
+:- use_module(agentprolog_language,[]).
 
 coding_tools_load(Registry, Root0, Outcome) :-
     catch(load(Registry, Root0, Outcome), E,
@@ -33,6 +35,7 @@ load(Registry, Root0, Outcome) :-
         agentprolog_tools:register_tools(Root), Outcome).
 
 tool(project_read, read, [path]).
+tool(project_analyze, read, [path]).
 tool(project_search, read, [path,query]).
 tool(project_write, write, [path,expected_sha256,content]).
 tool(project_patch, write, [path,expected_sha256,old,new]).
@@ -60,7 +63,7 @@ preflight(Root, Name, Args, Normalized, Details) :-
     Details = operation_details{project_root:Root, target_path:File}.
 
 prepare(Name, File, Args, Normalized) :-
-    ( Name == project_read
+    ( memberchk(Name,[project_read,project_analyze])
     -> bounded_read(File, _, _), Normalized = Args
     ; Name == project_search
     -> bounded_read(File, _, _), string_length(Args.query, L),
@@ -90,6 +93,14 @@ execute_locked(Root, Name, Args, Result) :-
     ( Name == project_read
     -> bounded_read(File, Content, Hash),
        Result = json{path:Args.path, content:Content, sha256:Hash}
+    ; Name == project_analyze
+    -> bounded_read(File,Content,_),file_name_extension(_,Ext,File),
+       atom_concat('.',Ext,Extension),
+       (extension_language(Extension,Language),memberchk(Language,[prolog,common_lisp])
+       -> atom_string(Language,LanguageText),
+          agentprolog_language:inspect_source(_{language:LanguageText,content:Content},Analysis),
+          Result=Analysis.put(path,Args.path)
+       ; throw(error(coding_tool(unsupported_source_language),_)))
     ; Name == project_search
     -> bounded_read(File, Content, Hash),
        split_string(Content, "\n", "", Lines),

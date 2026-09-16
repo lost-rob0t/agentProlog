@@ -4,6 +4,7 @@
 :- use_module(agentprolog_git_tools).
 :- use_module(agentprolog_process_tools).
 :- use_module(agentprolog_experts).
+:- use_module(agentprolog_language).
 
 % Host composition only. It creates no effect store and changes no authority.
 coding_registry_create(Root, Git, Profiles, Registry, Outcome) :-
@@ -19,4 +20,5 @@ compose(R,Root,Git,Profiles,Outcome) :-
     coding_tools_load(R,Root,A),
     ( A=ok(_) -> git_tools_load(R,Root,Git,B) ; B=A ),
     ( B=ok(_) -> process_tools_load(R,Root,Profiles,C) ; C=B ),
-    ( C=ok(_) -> coding_experts_load(R,Outcome) ; Outcome=C ).
+    ( C=ok(_) -> coding_experts_load(R,D) ; D=C ),
+    ( D=ok(_) -> language_experts_load(R,Outcome) ; Outcome=D ).

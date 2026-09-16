@@ -92,3 +92,5 @@ The Prolog suite exercises real tool registry, capability, authority, effect
 store, filesystem, Git, and process paths. It includes expert-to-edit flow,
 stale approval, no mutation before approval, output/deadline limits, process
 replay versus a new host snapshot, and permission preservation.
+
+The language-aware extension is described in [language-tools.md](language-tools.md).
