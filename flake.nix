@@ -117,6 +117,20 @@
             grep -F '"request_id":"m2"' replies.ndjson | grep -F '"status":"error"' | grep -F 'session_not_found' >/dev/null
             touch "$out"
           '';
+
+          # Guard the sidecar's mode-specific options against dropping the
+          # shared provider, session identity, or cancellation token.
+          sidecar-mode-options = pkgs.runCommand "sidecar-mode-options" {
+            nativeBuildInputs = [ swiProlog ];
+          } ''
+            export HOME="$TMPDIR/home"
+            mkdir -p "$HOME"
+            cd ${./prolog}
+            SWIPL_PACK_PATH="${prologRlmPack}" \
+              swipl -q -s agentprolog_dsh_sidecar_test.pl \
+                -g run_tests -t halt
+            touch "$out"
+          '';
         };
       });
 }

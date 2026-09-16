@@ -330,15 +330,17 @@ mode_options("symbolic", Base, Options) :- !,
     % Runtime defaults: root supervisor may select typed plans; child plans
     % are model-only, so recursion stays at depth 1.
     Options = Base.
-mode_options("symbolic-recursive", _Base, Options) :- !,
+mode_options("symbolic-recursive", Base, Options) :- !,
     % Child plans may select symbolic work themselves; the depth ceiling
     % below (and prolog-rlm's own budget validation) bounds the recursion.
-    Options = [child_capabilities([rlm,
-                                   model(openrouter),
-                                   context(peek),
-                                   context(slice),
-                                   context(search)]),
-               budget(_{max_recursion_depth:2})].
+    append(Base,
+           [child_capabilities([rlm,
+                                model(openrouter),
+                                context(peek),
+                                context(slice),
+                                context(search)]),
+            budget(_{max_recursion_depth:2})],
+           Options).
 
 %% Explicit budget updates forwarded from the plugin payload. Absent keys are
 %% skipped; present but non-conforming values are rejected before any
