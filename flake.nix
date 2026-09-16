@@ -9,7 +9,7 @@
     # public `prolog_rlm` pack built by that flake; bump this pin together
     # with the downstream streaming integration.
     prolog-rlm = {
-      url = "git+ssh://forgejo@git.starintel.actor/nsaspy/prolog-rlm?rev=51d2530f0e18c84cff860b7c0bf3afcc3c488057";
+      url = "git+https://git.starintel.actor/nsaspy/prolog-rlm?rev=51d2530f0e18c84cff860b7c0bf3afcc3c488057";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };

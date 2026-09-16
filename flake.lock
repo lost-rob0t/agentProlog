@@ -66,12 +66,12 @@
         "rev": "51d2530f0e18c84cff860b7c0bf3afcc3c488057",
         "revCount": 769,
         "type": "git",
-        "url": "ssh://forgejo@git.starintel.actor/nsaspy/prolog-rlm"
+        "url": "https://git.starintel.actor/nsaspy/prolog-rlm"
       },
       "original": {
         "rev": "51d2530f0e18c84cff860b7c0bf3afcc3c488057",
         "type": "git",
-        "url": "ssh://forgejo@git.starintel.actor/nsaspy/prolog-rlm"
+        "url": "https://git.starintel.actor/nsaspy/prolog-rlm"
       }
     },
     "root": {
