@@ -145,4 +145,65 @@ describe("SidecarTransport", () => {
     expect(stderr.join("")).toContain("sidecar diagnostic");
     await transport.stop("test end");
   });
+
+  it("delivers fragmented model text events before the final turn response", async () => {
+    const child = makeFakeChild();
+    const transport = makeTransport(child);
+    const started = transport.start();
+    child.stdout.emit("data", describeReply("describe-1"));
+    await started;
+    const observed: string[] = [];
+    transport.onEvent(event => observed.push(String(event.event)));
+    const pending = transport.request({
+      version: 1, request_id: "turn-1", session_id: "s1",
+      operation: "session.turn", payload: { text: "hello" },
+    });
+    let settled = false;
+    void pending.then(() => { settled = true; });
+    const event = (name: string, sequence: number, data: Record<string, unknown> = {}) =>
+      JSON.stringify({ version: 1, session_id: "s1", run_id: "turn-1", event: name, sequence, data }) + "\n";
+    const frames = [
+      event("turn_started", 0),
+      event("message_started", 1, { message_id: "turn-1:model:0:1", operation: "model" }),
+      event("text_delta", 2, { message_id: "turn-1:model:0:1", delta: "He" }),
+      event("text_delta", 3, { message_id: "turn-1:model:0:1", delta: "llo" }),
+      event("message_completed", 4, { message_id: "turn-1:model:0:1" }),
+    ].join("");
+    child.stdout.emit("data", frames.slice(0, 47));
+    child.stdout.emit("data", frames.slice(47));
+    expect(observed).toEqual(["turn_started", "message_started", "text_delta", "text_delta", "message_completed"]);
+    expect(settled).toBe(false);
+    child.stdout.emit("data", JSON.stringify({
+      version: 1, request_id: "turn-1", session_id: "s1", status: "ok", payload: { text: "Hello" },
+    }) + "\n");
+    await expect(pending).resolves.toMatchObject({ payload: { text: "Hello" } });
+    await transport.stop("test end");
+  });
+
+  it.each(["cancelled", "error"])("keeps partial text unfinished when a turn %s", async status => {
+    const child = makeFakeChild();
+    const transport = makeTransport(child);
+    const started = transport.start();
+    child.stdout.emit("data", describeReply("describe-1"));
+    await started;
+    const observed: string[] = [];
+    transport.onEvent(event => observed.push(String(event.event)));
+    const pending = transport.request({
+      version: 1, request_id: "turn-1", session_id: "s1",
+      operation: "session.turn", payload: { text: "hello" },
+    });
+    for (const [sequence, name] of ["turn_started", "message_started", "text_delta", "turn_finished"].entries()) {
+      child.stdout.emit("data", JSON.stringify({
+        version: 1, session_id: "s1", run_id: "turn-1", event: name, sequence,
+        data: name === "turn_finished" ? { status } : { delta: "partial" },
+      }) + "\n");
+    }
+    child.stdout.emit("data", JSON.stringify({
+      version: 1, request_id: "turn-1", session_id: "s1", status, payload: {},
+      error: { code: status, message: status },
+    }) + "\n");
+    await expect(pending).rejects.toMatchObject({ code: `runtime_${status}` });
+    expect(observed).toEqual(["turn_started", "message_started", "text_delta", "turn_finished"]);
+    await transport.stop("test end");
+  });
 });

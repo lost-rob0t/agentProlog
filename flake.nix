@@ -7,9 +7,9 @@
     flake-utils.url = "github:numtide/flake-utils";
     # Current reviewed Prolog-RLM head. Every sidecar and check consumes the
     # public `prolog_rlm` pack built by that flake; bump this pin together
-    # with the compatibility pin in packages/agentprolog/src/compatibility.ts.
+    # with the downstream streaming integration.
     prolog-rlm = {
-      url = "github:lost-rob0t/prolog-rlm/8e7b00934824f329acb373ea086be6294f67f9d3";
+      url = "git+ssh://forgejo@git.starintel.actor/nsaspy/prolog-rlm?rev=51d2530f0e18c84cff860b7c0bf3afcc3c488057";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -21,7 +21,7 @@
         swiProlog = pkgs.swi-prolog;
         prologRlm = prolog-rlm.packages.${system}.prolog-rlm;
         prologRlmPack = "${prologRlm}/share/swi-prolog/pack";
-        prologRlmRev = "8e7b00934824f329acb373ea086be6294f67f9d3";
+        prologRlmRev = "51d2530f0e18c84cff860b7c0bf3afcc3c488057";
 
         # Persistent Prolog sidecar consumed by the DSH plugin as
         # config.command. The wrapper pins both the SWI-Prolog build and the
