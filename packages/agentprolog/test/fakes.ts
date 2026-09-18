@@ -24,6 +24,8 @@ export interface FakeSession {
   readonly events: Array<{ type: string; data: unknown; seq: number }>;
   options?: unknown;
   append: (type: string, data: unknown, options?: unknown) => { type: string; data: unknown };
+  snapshotEvents: () => readonly { type: string; data: unknown; seq: number }[];
+  ownEvents: () => readonly { type: string; data: unknown; seq: number }[];
 }
 
 export interface FakeContextOptions {
@@ -57,6 +59,12 @@ export function makeFakeSession(id: string): FakeSession {
       const event = { type, data, seq };
       session.events.push(event);
       return event;
+    },
+    snapshotEvents() {
+      return [...session.events];
+    },
+    ownEvents() {
+      return [...session.events];
     },
   };
   return session;
