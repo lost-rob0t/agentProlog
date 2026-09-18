@@ -9,7 +9,7 @@ const PROFILE_CAPABILITIES = Object.freeze([
 ]);
 
 const PROFILE_DISPLAY_NAME = "AgentProlog";
-const MAX_VERSION_LENGTH = 128;
+const MAX_VERSION_LENGTH = 64;
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -18,7 +18,11 @@ function isRecord(value) {
 function boundedText(value) {
   if (typeof value !== "string") return null;
   if (value.length === 0 || value.length > MAX_VERSION_LENGTH) return null;
-  if (value.includes("\n") || value.includes("\r")) return null;
+  if (value !== value.trim()) return null;
+  for (const character of value) {
+    const code = character.codePointAt(0);
+    if (code < 0x20 || code === 0x7f) return null;
+  }
   return value;
 }
 
@@ -27,6 +31,8 @@ function compatiblePrologRlm(runtime) {
   if (runtime.id !== PROLOG_RLM_RUNTIME_ID) return false;
   if (runtime.protocol !== ZARA_RUNTIME_PROTOCOL) return false;
   if (runtime.installed !== true || runtime.available !== true) return false;
+  if (runtime.provider_control !== "runtime") return false;
+  if (runtime.model_control !== "runtime") return false;
   if (boundedText(runtime.runtime_version) === null) return false;
   return true;
 }
