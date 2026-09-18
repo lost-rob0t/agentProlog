@@ -47,6 +47,38 @@ AgentProlog owns:
 
 Generic runtime changes belong upstream in `prolog-rlm` rather than being duplicated here.
 
+## Optional Zara runtime profile
+
+AgentProlog can be exposed to Zara as a **profile of the Prolog-RLM runtime**.
+It is not a second runtime implementation and it does not make Zara depend on
+AgentProlog.
+
+```text
+Zara -> ZARA-RUNTIME/1 -> Prolog-RLM
+                         ^
+                         |
+                  profile: agentprolog
+```
+
+The Nix output `agentProlog-zara-runtime` starts the upstream
+`prolog-rlm-zara` sidecar with `--profile agentprolog`:
+
+```bash
+nix run .#zara-runtime -- --port 18765
+```
+
+Zara discovers the runtime as `prolog-rlm` and may render `agentprolog` in
+the descriptor's profile list. Provider/model calls, planning, recursive
+execution, budgets, cancellation and trace semantics remain owned by
+Prolog-RLM. Zara remains the host for chat/project context, plugins, approvals
+and platform integration.
+
+This profile is optional. Normal AgentProlog usage and normal Zara usage do not
+require it.
+
+Cross-repo authority: `lost-rob0t/zara#1046`; upstream bridge:
+`lost-rob0t/prolog-rlm#448`.
+
 ## Development
 
 ```bash
