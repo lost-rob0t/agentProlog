@@ -8,7 +8,7 @@
       # Zara runtime profile integration currently pins the exact upstream
       # prolog-rlm#448 head. Update this pin when that upstream bridge moves;
       # AgentProlog remains downstream and must not fork the runtime ABI.
-      url = "github:lost-rob0t/prolog-rlm/96a1e24bdfafa00b7bd904c29428033474a9e227";
+      url = "github:lost-rob0t/prolog-rlm/0c7c9d2542a953a9b1202daea558389437f1f853";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
