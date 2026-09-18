@@ -43,6 +43,23 @@ importers:
         specifier: 3.2.4
         version: 3.2.4(@types/node@24.10.1)
 
+
+  packages/tui:
+    dependencies:
+      '@agentprolog/dsh':
+        specifier: workspace:*
+        version: link:../agentprolog
+    devDependencies:
+      '@types/node':
+        specifier: 24.10.1
+        version: 24.10.1
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 3.2.4
+        version: 3.2.4(@types/node@24.10.1)
+
 packages:
 
   '@deepseek-ai/cordis@4.0.2':
