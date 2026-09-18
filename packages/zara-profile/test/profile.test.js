@@ -40,10 +40,20 @@ test("fails closed for another runtime or protocol major", () => {
   assert.equal(advertiseAgentPrologProfile(runtime({ protocol: "ZARA-RUNTIME/2" })), null);
 });
 
-test("requires bounded runtime version identity", () => {
+test("requires canonical runtime ownership before advertising the profile", () => {
+  assert.equal(advertiseAgentPrologProfile(runtime({ provider_control: "zara" })), null);
+  assert.equal(advertiseAgentPrologProfile(runtime({ provider_control: "mixed" })), null);
+  assert.equal(advertiseAgentPrologProfile(runtime({ model_control: "zara" })), null);
+  assert.equal(advertiseAgentPrologProfile(runtime({ model_control: "mixed" })), null);
+});
+
+test("requires canonical bounded runtime version identity", () => {
   assert.equal(advertiseAgentPrologProfile(runtime({ runtime_version: "" })), null);
   assert.equal(advertiseAgentPrologProfile(runtime({ runtime_version: "bad\nversion" })), null);
-  assert.equal(advertiseAgentPrologProfile(runtime({ runtime_version: "x".repeat(129) })), null);
+  assert.equal(advertiseAgentPrologProfile(runtime({ runtime_version: "bad\tversion" })), null);
+  assert.equal(advertiseAgentPrologProfile(runtime({ runtime_version: " 1.0.0" })), null);
+  assert.equal(advertiseAgentPrologProfile(runtime({ runtime_version: "1.0.0 " })), null);
+  assert.equal(advertiseAgentPrologProfile(runtime({ runtime_version: "x".repeat(65) })), null);
 });
 
 test("profile projection does not leak runtime credentials or authority", () => {
