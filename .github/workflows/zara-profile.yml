@@ -1,0 +1,26 @@
+name: Zara Runtime Profile
+
+on:
+  pull_request:
+    paths:
+      - "packages/zara-profile/**"
+      - ".github/workflows/zara-profile.yml"
+  push:
+    branches: [main]
+    paths:
+      - "packages/zara-profile/**"
+      - ".github/workflows/zara-profile.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  profile-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.19.0"
+      - name: Run AgentProlog ZARA-RUNTIME profile contract tests
+        run: npm test --prefix packages/zara-profile
