@@ -107,7 +107,7 @@ A live model turn additionally needs an OpenRouter-compatible key in the environ
 
 - Session resume, steer/inject, and maintenance operations are not implemented yet and fail closed.
 - The canonical sidecar runtime currently speaks to an OpenRouter-compatible provider (`defaults.model` selects the model); DSH-side provider selection applies to DSH surfaces.
-- DSH compatibility is pinned fail-closed to `0.1.1-rc.2` (see `packages/agentprolog/src/compatibility.ts`); bump both sides together with the flake's prolog-rlm pin.
+- DSH compatibility is pinned fail-closed to `0.1.2-rc.1` / `a66e4702047846cdaa10c66c9d3df3951f5ea70d`. DeepSeek Harness `0.1.1-rc.2` and earlier are rejected because of CVE-2026-82533. Exact package pins are part of the security boundary; see [docs/security.md](docs/security.md).
 - No TUI ships in this repository; the recommendation and integration plan live in [docs/adr/0001-dsh-tui-selection.md](docs/adr/0001-dsh-tui-selection.md).
 
 ## Repository layout

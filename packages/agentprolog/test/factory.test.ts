@@ -53,15 +53,10 @@ function makeHarness(): Harness {
   const bridge = new Bridge({
     send: frame => {
       sent.push(frame);
-      // Lifecycle operations settle immediately, mirroring the real sidecar;
-      // turn responses are driven by the tests.
-      if (frame.operation === "session.start" || frame.operation === "session.cancel") {
-        queueMicrotask(() =>
-          respondTo(frame.request_id, {
-            text: "unused",
-            ...(frame.operation === "session.cancel" ? { error: { code: "cancelled", message: "unused" } } : {}),
-          }),
-        );
+      // Session startup settles immediately; turn/cancel responses are driven
+      // explicitly by each test so no request can receive two synthetic replies.
+      if (frame.operation === "session.start") {
+        queueMicrotask(() => respondTo(frame.request_id, { text: "unused" }));
       }
     },
   });

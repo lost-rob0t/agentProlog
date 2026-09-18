@@ -103,12 +103,18 @@ describe("agentProlog DSH plugin", () => {
     expect(service.capabilities()).toMatchObject({ modes: true });
   });
 
-  it("fails closed on harness version mismatch without mounting anything", async () => {
+  it("rejects the CVE-2026-82533 vulnerable Harness before transport construction or activation", async () => {
     const ctx = makeFakeContext();
-    const { Transport } = fakeTransportFactory();
+    const deps = makeTransportDeps();
     await expect(
-      apply(ctx as unknown as never, config({ harness: { version: "0.1.0-rc.8", revision: "deadbeef" } }), { Transport }),
-    ).rejects.toMatchObject({ message: /unsupported DeepSeek Harness version/ });
+      apply(ctx as unknown as never, config({
+        harness: {
+          version: "0.1.1-rc.2",
+          revision: "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+        },
+      }), deps),
+    ).rejects.toMatchObject({ code: "harness_version_mismatch" });
+    expect(deps.controls.instances).toHaveLength(0);
     expect(ctx.agents?.factories).toHaveLength(0);
     expect(ctx.commands?.registered).toHaveLength(0);
     expect(ctx.services.size).toBe(0);

@@ -24,6 +24,8 @@ export interface FakeSession {
   readonly events: Array<{ type: string; data: unknown; seq: number }>;
   options?: unknown;
   append: (type: string, data: unknown, options?: unknown) => { type: string; data: unknown };
+  snapshotEvents: () => readonly { type: string; data: unknown; seq: number }[];
+  ownEvents: () => readonly { type: string; data: unknown; seq: number }[];
 }
 
 export interface FakeContextOptions {
@@ -57,6 +59,12 @@ export function makeFakeSession(id: string): FakeSession {
       const event = { type, data, seq };
       session.events.push(event);
       return event;
+    },
+    snapshotEvents() {
+      return [...session.events];
+    },
+    ownEvents() {
+      return [...session.events];
     },
   };
   return session;
@@ -139,6 +147,6 @@ export function makeFakeContext(options: FakeContextOptions = {}): FakeContext {
 }
 
 export const HARNESS = Object.freeze({
-  version: "0.1.1-rc.2",
-  revision: "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+  version: "0.1.2-rc.1",
+  revision: "a66e4702047846cdaa10c66c9d3df3951f5ea70d",
 });

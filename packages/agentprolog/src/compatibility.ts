@@ -1,12 +1,12 @@
 import { ProtocolError } from "./errors.js";
 
-// Required compatibility target from prolog-rlm#184 / agentProlog#7. DeepSeek
-// Harness is a developer preview, so the plugin fails closed instead of
-// silently widening its supported host surface. Bump both sides together with
-// the prolog-rlm pin in flake.nix.
+// Security compatibility target. DeepSeek Harness <= 0.1.1-rc.2 is affected
+// by CVE-2026-82533, so host identity remains an exact, fail-closed gate before
+// plugin startup/publication. Review every future release explicitly; dist-tags
+// are not a security boundary.
 export const SUPPORTED_HARNESS = Object.freeze({
-  version: "0.1.1-rc.2",
-  revision: "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+  version: "0.1.2-rc.1",
+  revision: "a66e4702047846cdaa10c66c9d3df3951f5ea70d",
   node: "^22.19.0 || >=24.0.0",
 });
 
