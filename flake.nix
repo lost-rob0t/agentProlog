@@ -5,10 +5,10 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     prolog-rlm = {
-      # Zara runtime profile integration currently pins the exact upstream
-      # prolog-rlm#448 head. Update this pin when that upstream bridge moves;
-      # AgentProlog remains downstream and must not fork the runtime ABI.
-      url = "github:lost-rob0t/prolog-rlm/0c7c9d2542a953a9b1202daea558389437f1f853";
+      # Zara runtime profile integration pins the merged upstream
+      # prolog-rlm#448 main commit; AgentProlog remains downstream and must
+      # not fork or redefine the generic runtime ABI.
+      url = "github:lost-rob0t/prolog-rlm/fa03bb5b48c858b16ec6061d5b49804ee6f29070";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
