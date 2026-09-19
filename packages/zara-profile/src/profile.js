@@ -8,6 +8,12 @@ const PROFILE_CAPABILITIES = Object.freeze([
   "spec-plan-verify",
 ]);
 
+const SELECTABLE_RUNTIME_HEALTH = Object.freeze([
+  "ready",
+  "busy",
+  "degraded",
+]);
+
 const PROFILE_DISPLAY_NAME = "AgentProlog";
 const MAX_VERSION_LENGTH = 64;
 
@@ -31,6 +37,7 @@ function compatiblePrologRlm(runtime) {
   if (runtime.id !== PROLOG_RLM_RUNTIME_ID) return false;
   if (runtime.protocol !== ZARA_RUNTIME_PROTOCOL) return false;
   if (runtime.installed !== true || runtime.available !== true) return false;
+  if (!SELECTABLE_RUNTIME_HEALTH.includes(runtime.health)) return false;
   if (runtime.provider_control !== "runtime") return false;
   if (runtime.model_control !== "runtime") return false;
   if (boundedText(runtime.runtime_version) === null) return false;
