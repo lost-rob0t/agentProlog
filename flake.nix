@@ -43,8 +43,17 @@
         apps.default = self.apps.${system}.agentProlog;
 
         devShells.default = pkgs.mkShell {
-          packages = [ upstream ];
+          packages = [ upstream pkgs.nodejs ];
         };
+
+        checks.workbench-client = pkgs.runCommand "agentprolog-workbench-client" {
+          nativeBuildInputs = [ pkgs.nodejs ];
+          PROLOG_RLM_SOURCE = prolog-rlm.outPath;
+        } ''
+          cd ${self.outPath}
+          node --test packages/workbench-client/test/*.test.js
+          touch "$out"
+        '';
 
         checks.runtime-load = pkgs.runCommand "agentprolog-runtime-load" {
           nativeBuildInputs = [ upstream ];
