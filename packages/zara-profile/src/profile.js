@@ -34,7 +34,15 @@ function boundedText(value) {
 
 function advertisesAgentProlog(runtime) {
   if (!Array.isArray(runtime.profiles)) return false;
-  return runtime.profiles.includes(AGENTPROLOG_PROFILE_ID);
+
+  const seen = new Set();
+  for (const profileId of runtime.profiles) {
+    const canonicalId = boundedText(profileId);
+    if (canonicalId === null || seen.has(canonicalId)) return false;
+    seen.add(canonicalId);
+  }
+
+  return seen.has(AGENTPROLOG_PROFILE_ID);
 }
 
 function compatiblePrologRlm(runtime) {
