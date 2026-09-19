@@ -51,7 +51,7 @@
           PROLOG_RLM_SOURCE = prolog-rlm.outPath;
         } ''
           cd ${self.outPath}
-          node --test packages/workbench-client/test
+          node --test packages/workbench-client/test/*.test.js
           touch "$out"
         '';
 
