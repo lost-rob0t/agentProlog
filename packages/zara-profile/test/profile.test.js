@@ -6,6 +6,7 @@ import {
   PROLOG_RLM_RUNTIME_ID,
   ZARA_RUNTIME_PROTOCOL,
   advertiseAgentPrologProfile,
+  handshakeAgentPrologProfile,
 } from "../src/profile.js";
 
 const runtime = (extra = {}) => ({
@@ -17,6 +18,14 @@ const runtime = (extra = {}) => ({
   health: "ready",
   provider_control: "runtime",
   model_control: "runtime",
+  ...extra,
+});
+
+const handshake = (extra = {}) => ({
+  protocol: ZARA_RUNTIME_PROTOCOL,
+  profile_id: AGENTPROLOG_PROFILE_ID,
+  runtime_id: PROLOG_RLM_RUNTIME_ID,
+  requires_runtime: PROLOG_RLM_RUNTIME_ID,
   ...extra,
 });
 
@@ -79,6 +88,64 @@ test("profile projection does not leak runtime credentials or authority", () => 
 
   assert.equal(encoded.includes("TOP-SECRET"), false);
   assert.equal(encoded.includes("NOPE"), false);
+  assert.equal(Object.hasOwn(profile, "principal_id"), false);
+  assert.equal(Object.hasOwn(profile, "provider"), false);
+  assert.equal(Object.hasOwn(profile, "api_key"), false);
+});
+
+test("handshake binds AgentProlog profile to canonical Prolog-RLM identity", () => {
+  const profile = handshakeAgentPrologProfile(runtime(), handshake());
+
+  assert.equal(profile.id, AGENTPROLOG_PROFILE_ID);
+  assert.equal(profile.protocol, ZARA_RUNTIME_PROTOCOL);
+  assert.equal(profile.runtime_id, PROLOG_RLM_RUNTIME_ID);
+  assert.equal(profile.requires_runtime, PROLOG_RLM_RUNTIME_ID);
+});
+
+test("handshake fails closed on protocol, profile, or runtime substitution", () => {
+  assert.equal(
+    handshakeAgentPrologProfile(runtime(), handshake({ protocol: "ZARA-RUNTIME/2" })),
+    null,
+  );
+  assert.equal(
+    handshakeAgentPrologProfile(runtime(), handshake({ profile_id: "other-profile" })),
+    null,
+  );
+  assert.equal(
+    handshakeAgentPrologProfile(runtime(), handshake({ runtime_id: "agentprolog" })),
+    null,
+  );
+  assert.equal(
+    handshakeAgentPrologProfile(runtime(), handshake({ requires_runtime: "agentprolog" })),
+    null,
+  );
+});
+
+test("handshake cannot resurrect an unavailable or non-selectable runtime", () => {
+  assert.equal(
+    handshakeAgentPrologProfile(runtime({ available: false }), handshake()),
+    null,
+  );
+  assert.equal(
+    handshakeAgentPrologProfile(runtime({ health: "failed" }), handshake()),
+    null,
+  );
+});
+
+test("handshake never projects caller credentials, grants, or principal authority", () => {
+  const profile = handshakeAgentPrologProfile(runtime(), handshake({
+    api_key: "CALLER-SECRET",
+    principal_id: "root",
+    capabilities: ["shell", "filesystem", "principal-admin"],
+    provider: { api_key: "CALLER-SECRET" },
+  }));
+  const encoded = JSON.stringify(profile);
+
+  assert.equal(encoded.includes("CALLER-SECRET"), false);
+  assert.equal(encoded.includes("root"), false);
+  assert.equal(encoded.includes("shell"), false);
+  assert.equal(encoded.includes("filesystem"), false);
+  assert.deepEqual(profile.capabilities, ["agent", "coding", "spec-plan-verify"]);
   assert.equal(Object.hasOwn(profile, "principal_id"), false);
   assert.equal(Object.hasOwn(profile, "provider"), false);
   assert.equal(Object.hasOwn(profile, "api_key"), false);
