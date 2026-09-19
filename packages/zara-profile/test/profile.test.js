@@ -14,6 +14,7 @@ const runtime = (extra = {}) => ({
   runtime_version: "1.0.0",
   installed: true,
   available: true,
+  health: "ready",
   provider_control: "runtime",
   model_control: "runtime",
   ...extra,
@@ -33,6 +34,17 @@ test("advertises AgentProlog as a profile over Prolog-RLM", () => {
 test("does not manufacture a profile when Prolog-RLM is unavailable", () => {
   assert.equal(advertiseAgentPrologProfile(runtime({ available: false })), null);
   assert.equal(advertiseAgentPrologProfile(runtime({ installed: false })), null);
+});
+
+test("requires a selectable Prolog-RLM health state", () => {
+  assert.notEqual(advertiseAgentPrologProfile(runtime({ health: "busy" })), null);
+  assert.notEqual(advertiseAgentPrologProfile(runtime({ health: "degraded" })), null);
+
+  assert.equal(advertiseAgentPrologProfile(runtime({ health: "starting" })), null);
+  assert.equal(advertiseAgentPrologProfile(runtime({ health: "failed" })), null);
+  assert.equal(advertiseAgentPrologProfile(runtime({ health: "stopped" })), null);
+  assert.equal(advertiseAgentPrologProfile(runtime({ health: undefined })), null);
+  assert.equal(advertiseAgentPrologProfile(runtime({ health: "ready\nadmin" })), null);
 });
 
 test("fails closed for another runtime or protocol major", () => {
