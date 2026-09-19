@@ -18,6 +18,7 @@ const runtime = (extra = {}) => ({
   health: "ready",
   provider_control: "runtime",
   model_control: "runtime",
+  profiles: [AGENTPROLOG_PROFILE_ID],
   ...extra,
 });
 
@@ -43,6 +44,13 @@ test("advertises AgentProlog as a profile over Prolog-RLM", () => {
 test("does not manufacture a profile when Prolog-RLM is unavailable", () => {
   assert.equal(advertiseAgentPrologProfile(runtime({ available: false })), null);
   assert.equal(advertiseAgentPrologProfile(runtime({ installed: false })), null);
+});
+
+test("does not manufacture AgentProlog unless Prolog-RLM advertises that profile", () => {
+  assert.equal(advertiseAgentPrologProfile(runtime({ profiles: [] })), null);
+  assert.equal(advertiseAgentPrologProfile(runtime({ profiles: ["other-profile"] })), null);
+  assert.equal(advertiseAgentPrologProfile(runtime({ profiles: undefined })), null);
+  assert.equal(advertiseAgentPrologProfile(runtime({ profiles: AGENTPROLOG_PROFILE_ID })), null);
 });
 
 test("requires a selectable Prolog-RLM health state", () => {
@@ -121,13 +129,17 @@ test("handshake fails closed on protocol, profile, or runtime substitution", () 
   );
 });
 
-test("handshake cannot resurrect an unavailable or non-selectable runtime", () => {
+test("handshake cannot resurrect an unavailable, non-selectable, or unadvertised runtime", () => {
   assert.equal(
     handshakeAgentPrologProfile(runtime({ available: false }), handshake()),
     null,
   );
   assert.equal(
     handshakeAgentPrologProfile(runtime({ health: "failed" }), handshake()),
+    null,
+  );
+  assert.equal(
+    handshakeAgentPrologProfile(runtime({ profiles: [] }), handshake()),
     null,
   );
 });
