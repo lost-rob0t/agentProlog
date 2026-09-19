@@ -53,6 +53,29 @@ test("does not manufacture AgentProlog unless Prolog-RLM advertises that profile
   assert.equal(advertiseAgentPrologProfile(runtime({ profiles: AGENTPROLOG_PROFILE_ID })), null);
 });
 
+test("fails closed for malformed or duplicate advertised profile identities", () => {
+  assert.equal(
+    advertiseAgentPrologProfile(runtime({ profiles: [AGENTPROLOG_PROFILE_ID, null] })),
+    null,
+  );
+  assert.equal(
+    advertiseAgentPrologProfile(runtime({ profiles: [AGENTPROLOG_PROFILE_ID, ""] })),
+    null,
+  );
+  assert.equal(
+    advertiseAgentPrologProfile(runtime({ profiles: [AGENTPROLOG_PROFILE_ID, "bad\nprofile"] })),
+    null,
+  );
+  assert.equal(
+    advertiseAgentPrologProfile(runtime({ profiles: [AGENTPROLOG_PROFILE_ID, AGENTPROLOG_PROFILE_ID] })),
+    null,
+  );
+  assert.notEqual(
+    advertiseAgentPrologProfile(runtime({ profiles: ["other-profile", AGENTPROLOG_PROFILE_ID] })),
+    null,
+  );
+});
+
 test("requires a selectable Prolog-RLM health state", () => {
   assert.notEqual(advertiseAgentPrologProfile(runtime({ health: "busy" })), null);
   assert.notEqual(advertiseAgentPrologProfile(runtime({ health: "degraded" })), null);
