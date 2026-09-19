@@ -59,6 +59,16 @@ export function advertiseAgentPrologProfile(runtime) {
   });
 }
 
+export function handshakeAgentPrologProfile(runtime, request) {
+  if (!isRecord(request)) return null;
+  if (request.protocol !== ZARA_RUNTIME_PROTOCOL) return null;
+  if (request.profile_id !== AGENTPROLOG_PROFILE_ID) return null;
+  if (request.runtime_id !== PROLOG_RLM_RUNTIME_ID) return null;
+  if (request.requires_runtime !== PROLOG_RLM_RUNTIME_ID) return null;
+
+  return advertiseAgentPrologProfile(runtime);
+}
+
 export {
   AGENTPROLOG_PROFILE_ID,
   PROLOG_RLM_RUNTIME_ID,
