@@ -19,14 +19,14 @@ It deliberately does **not** execute tools, own authority, implement agent sched
 ## Test
 
 ```bash
-node --test packages/workbench-client/test
+node --test packages/workbench-client/test/*.test.js
 ```
 
 To additionally test against the upstream polyglot golden fixture:
 
 ```bash
 PROLOG_RLM_SOURCE=/path/to/prolog-rlm \
-  node --test packages/workbench-client/test
+  node --test packages/workbench-client/test/*.test.js
 ```
 
 The repository Nix check supplies the pinned `prolog-rlm` source automatically.
