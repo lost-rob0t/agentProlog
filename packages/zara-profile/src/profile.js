@@ -32,6 +32,11 @@ function boundedText(value) {
   return value;
 }
 
+function advertisesAgentProlog(runtime) {
+  if (!Array.isArray(runtime.profiles)) return false;
+  return runtime.profiles.includes(AGENTPROLOG_PROFILE_ID);
+}
+
 function compatiblePrologRlm(runtime) {
   if (!isRecord(runtime)) return false;
   if (runtime.id !== PROLOG_RLM_RUNTIME_ID) return false;
@@ -41,6 +46,7 @@ function compatiblePrologRlm(runtime) {
   if (runtime.provider_control !== "runtime") return false;
   if (runtime.model_control !== "runtime") return false;
   if (boundedText(runtime.runtime_version) === null) return false;
+  if (!advertisesAgentProlog(runtime)) return false;
   return true;
 }
 
