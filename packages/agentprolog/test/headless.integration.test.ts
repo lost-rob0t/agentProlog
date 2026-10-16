@@ -59,6 +59,21 @@ describe.skipIf(!SIDECAR)("headless sidecar integration (real Prolog process, ke
     await transport.stop("test end");
   }, 30000);
 
+  it("registers a confined project-read tool for each session", async () => {
+    const transport = new SidecarTransport({ command: SIDECAR! });
+    await transport.start();
+    await transport.request({ version: 1, request_id: "ts1", session_id: "tools", operation: "session.start", payload: { cwd: process.cwd() } });
+    const listed = (await transport.request({ version: 1, request_id: "ts2", session_id: "tools", operation: "tool.list", payload: {} })) as {
+      payload: { tools: Array<{ name: string }> };
+    };
+    expect(listed.payload.tools.map(tool => tool.name)).toEqual(["project_read"]);
+    await expect(transport.request({
+      version: 1, request_id: "ts3", session_id: "missing-root", operation: "session.start",
+      payload: { cwd: "/path/that/does/not/exist" },
+    })).rejects.toMatchObject({ code: "runtime_error", runtimeCode: "runtime_exception" });
+    await transport.stop("test end");
+  }, 30000);
+
   it("fails a turn closed on an unsupported provider without any model call", async () => {
     const transport = new SidecarTransport({ command: SIDECAR! });
     await transport.start();

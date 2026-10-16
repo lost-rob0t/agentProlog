@@ -21,8 +21,15 @@ function makeHarness(): Harness {
   const outputBuffer = { text: "" };
 
   const respondTo: Harness["respondTo"] = (requestId, overrides) => {
+    const request = sent.find(frame => frame.request_id === requestId);
     const payload: Record<string, unknown> =
-      overrides.skills !== undefined
+      request?.operation === "session.mode"
+        ? { mode: request.payload.mode }
+        : request?.operation === "session.inspect"
+          ? { session_id: request.session_id, mode: "direct", busy: false }
+        : request?.operation === "tool.list"
+          ? { tools: [{ name: "project_read", description: "Read a project file" }] }
+      : overrides.skills !== undefined
         ? { skills: overrides.skills }
         : overrides.status === undefined || overrides.status === "ok"
           ? { text: overrides.text ?? "symbolic reply" }
@@ -42,7 +49,7 @@ function makeHarness(): Harness {
       sent.push(frame);
       // Lifecycle operations settle immediately, mirroring the sidecar; turns
       // and skill listings are test-driven through respondTo/respondLast.
-      if (frame.operation === "session.start" || frame.operation === "session.cancel") {
+      if (["session.start", "session.cancel", "session.mode", "session.inspect", "tool.list", "skill.reset"].includes(frame.operation)) {
         queueMicrotask(() => respondTo(frame.request_id, { text: "unused" }));
       }
     },
@@ -191,6 +198,18 @@ describe("TUI app", () => {
     });
     await pending;
     expect(output.text).toContain("• demo-skill — a demo");
+    await app.handleLine("/quit");
+    await quit;
+  });
+
+  it("inspects canonical status and registered direct tools", async () => {
+    const { app, output, sent, quit } = makeHarness();
+    await app.handleLine("/status");
+    await app.handleLine("/tools");
+    expect(sent.map(frame => frame.operation)).toContain("session.inspect");
+    expect(sent.map(frame => frame.operation)).toContain("tool.list");
+    expect(output.text).toContain("Session: s1 · mode: direct · idle");
+    expect(output.text).toContain("project_read");
     await app.handleLine("/quit");
     await quit;
   });

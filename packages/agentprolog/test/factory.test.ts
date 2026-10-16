@@ -161,8 +161,6 @@ describe("PrologAgentFactory (mode-aware, headless)", () => {
 
     agent.cancel({ kind: "user" });
     expect(lastOperation(harness.sent)).toBe("session.cancel");
-    const cancelRequestId = harness.sent.at(-1)!.request_id;
-    harness.respondTo(cancelRequestId, { text: "unused" });
     harness.respondTo(turnRequestId, { status: "cancelled", error: { code: "cancelled", message: "cancelled" } });
     await agent.whenIdle();
 

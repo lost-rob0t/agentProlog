@@ -26,6 +26,7 @@ cancellation, and malformed frames fail closed; nothing silently restarts.
 :- use_module(library(rlm_conversation), []).
 :- use_module(library(rlm_conversation_runtime), []).
 :- use_module(library(rlm_skill), []).
+:- use_module(library(rlm_tool), []).
 
 :- dynamic sidecar_store/1.
 :- dynamic sidecar_session/2.
@@ -34,6 +35,7 @@ cancellation, and malformed frames fail closed; nothing silently restarts.
 :- dynamic sidecar_cancelled/2.
 :- dynamic sidecar_event_seq/3.
 :- dynamic sidecar_skill_catalog/1.
+:- dynamic sidecar_tool_registry/2.
 
 :- initialization(main, main).
 
@@ -68,7 +70,9 @@ close_runtime :-
     retractall(sidecar_turn(_, _, _)),
     retractall(sidecar_cancelled(_, _)),
     retractall(sidecar_event_seq(_, _, _)),
-    retractall(sidecar_skill_catalog(_)).
+    retractall(sidecar_skill_catalog(_)),
+    forall(retract(sidecar_tool_registry(_, Registry)),
+           rlm_tool:tool_registry_destroy(Registry)).
 
 request_loop :-
     read_line_to_string(user_input, Line),
@@ -108,7 +112,8 @@ dispatch_operation("runtime.describe", Frame) :- !,
                               agent_factory:true,
                               evolution:false,
                               modes:true,
-                              skills:true}}).
+                              skills:true,
+                              tools:true}}).
 dispatch_operation("session.start", Frame) :- !,
     session_start(Frame).
 dispatch_operation("session.mode", Frame) :- !,
@@ -125,23 +130,48 @@ dispatch_operation("skill.list", Frame) :- !,
     skill_list(Frame).
 dispatch_operation("skill.reset", Frame) :- !,
     skill_reset(Frame).
+dispatch_operation("tool.list", Frame) :- !,
+    tool_list(Frame).
 dispatch_operation(Operation, Frame) :-
     reply_error(Frame, "unknown_operation",
                 _{message:"operation is not implemented by the AgentProlog core sidecar",
                   operation:Operation}).
 
 session_start(Frame) :-
+    catch(session_start_(Frame), Error, reply_exception(Frame, session_start, Error)).
+
+session_start_(Frame) :-
     SessionId = Frame.session_id,
     (   sidecar_session(SessionId, _)
     ->  reply_ok(Frame, _{started:false, already_started:true})
     ;   sidecar_store(Store),
+        session_tool_registry(Frame, Registry),
         rlm_conversation:conversation_create(Store, [id(SessionId)], Outcome),
         (   Outcome = ok(Conversation)
-        ->  assertz(sidecar_session(SessionId, Conversation)),
+        ->  assertz(sidecar_tool_registry(SessionId, Registry)),
+            assertz(sidecar_session(SessionId, Conversation)),
             assertz(sidecar_mode(SessionId, "direct")),
             reply_ok(Frame, _{started:true, already_started:false, mode:"direct"})
-        ;   reply_runtime_outcome(Frame, session_start, Outcome)
+        ;   rlm_tool:tool_registry_destroy(Registry),
+            reply_runtime_outcome(Frame, session_start, Outcome)
         )
+    ).
+
+session_tool_registry(Frame, Registry) :-
+    payload_dict(Frame, Payload),
+    (   get_dict(cwd, Payload, Cwd), Cwd \== null
+    ->  ( string(Cwd), Cwd \== "" -> true
+        ; throw(error(invalid_project_root(Cwd), _)) )
+    ;   Cwd = '.'
+    ),
+    absolute_file_name(Cwd, Root,
+                       [file_type(directory), access(read), file_errors(error)]),
+    rlm_tool:tool_registry_create(Registry),
+    (   rlm_tool:register_project_read_tool(Registry, Root,
+                                            [max_file_bytes(8192)], ok(_))
+    ->  true
+    ;   rlm_tool:tool_registry_destroy(Registry),
+        throw(error(project_read_registration_failed(Root), _))
     ).
 
 %% session.mode: canonical reasoning-mode transition for one session.
@@ -260,7 +290,9 @@ run_turn_call(Frame, Conversation, Token, Mode, Outcome, Model) :-
 base_completion_options(Token, Frame, Provider, [provider(Provider),
                                                  provider_name(openrouter),
                                                  cancel_token(Token),
-                                                 session_id(Frame.session_id)]).
+                                                 session_id(Frame.session_id),
+                                                 tool_registry(Registry)]) :-
+    sidecar_tool_registry(Frame.session_id, Registry).
 
 %% Mode-specific capabilities, child capabilities, and budgets. These are the
 %% explicit termination controls: recursion depth 0 and no `rlm` capability
@@ -322,23 +354,24 @@ skill_name_string(Name, _) :- throw(error(invalid_skill_name(Name), _)).
 
 mode_options("direct", Base, Options) :- !,
     append(Base,
-           [capabilities([model(openrouter)]),
-            child_capabilities([model(openrouter)]),
+           [capabilities([model(openrouter), tool(project_read)]),
+            child_capabilities([model(openrouter), tool(project_read)]),
             budget(_{max_recursion_depth:0})],
            Options).
 mode_options("symbolic", Base, Options) :- !,
     % Runtime defaults: root supervisor may select typed plans; child plans
     % are model-only, so recursion stays at depth 1.
     Options = Base.
-mode_options("symbolic-recursive", _Base, Options) :- !,
+mode_options("symbolic-recursive", Base, Options) :- !,
     % Child plans may select symbolic work themselves; the depth ceiling
     % below (and prolog-rlm's own budget validation) bounds the recursion.
-    Options = [child_capabilities([rlm,
+    append(Base, [child_capabilities([rlm,
                                    model(openrouter),
+                                   tool(project_read),
                                    context(peek),
                                    context(slice),
                                    context(search)]),
-               budget(_{max_recursion_depth:2})].
+               budget(_{max_recursion_depth:2})], Options).
 
 %% Explicit budget updates forwarded from the plugin payload. Absent keys are
 %% skipped; present but non-conforming values are rejected before any
@@ -475,6 +508,19 @@ session_inspect(Frame) :-
             reply_ok(Frame, _{session_id:SessionId, busy:Busy, mode:Mode, stats:Stats})
         ;   reply_runtime_outcome(Frame, inspect, Outcome)
         )
+    ;   reply_error(Frame, "session_not_found", _{message:"unknown session"})
+    ).
+
+tool_list(Frame) :-
+    SessionId = Frame.session_id,
+    (   sidecar_tool_registry(SessionId, Registry)
+    ->  rlm_tool:tool_discover(Registry, Schemas),
+        findall(_{name:Name, description:Description},
+                ( member(Schema, Schemas),
+                  atom_string(Schema.name, Name),
+                  Description = Schema.description ),
+                Tools),
+        reply_ok(Frame, _{tools:Tools})
     ;   reply_error(Frame, "session_not_found", _{message:"unknown session"})
     ).
 

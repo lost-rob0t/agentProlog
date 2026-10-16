@@ -153,7 +153,7 @@ export class App {
   private async handleCommand(parsed: { name: string; args: string }): Promise<void> {
     const modeCommand = resolveModeCommand(parsed.name);
     if (modeCommand) {
-      this.options.router.setMode(this.options.sessionId, modeCommand);
+      await this.setMode(modeCommand);
       this.printLine(`◈ Mode: ${modeCommand}`);
       return;
     }
@@ -164,11 +164,43 @@ export class App {
             this.printLine(`✗ unknown mode "${parsed.args}" — one of: direct, symbolic, symbolic-recursive`);
             return;
           }
-          this.options.router.setMode(this.options.sessionId, parseMode(parsed.args));
+          await this.setMode(parseMode(parsed.args));
           this.printLine(`◈ Mode: ${parsed.args}`);
           return;
         }
-        this.printLine(`Mode: ${this.options.router.resolveMode(this.options.sessionId)}`);
+        const state = await this.request("session.inspect");
+        this.printLine(`Mode: ${String(state.mode)}`);
+        return;
+      }
+      case "status": {
+        const state = await this.request("session.inspect");
+        this.printLine(`Session: ${String(state.session_id)} · mode: ${String(state.mode)} · ${state.busy ? "running" : "idle"}`);
+        return;
+      }
+      case "tools": {
+        const result = await this.request("tool.list");
+        const tools = Array.isArray(result.tools) ? result.tools : [];
+        if (tools.length === 0) this.printLine("No tools registered for this session.");
+        for (const tool of tools) {
+          if (typeof tool === "object" && tool !== null && typeof tool.name === "string") {
+            this.printLine(`• ${tool.name}${typeof tool.description === "string" ? ` — ${tool.description}` : ""}`);
+          }
+        }
+        return;
+      }
+      case "skill": {
+        if (parsed.args === "reset") {
+          const result = await this.request("skill.reset");
+          this.printLine(`Skills reset (${Array.isArray(result.skills) ? result.skills.length : 0} core skills).`);
+          return;
+        }
+        if (parsed.args.startsWith("load ") && parsed.args.slice(5).trim()) {
+          const path = parsed.args.slice(5).trim();
+          const result = await this.request("skill.load", { roots: [{ source: "project", path }] });
+          this.printLine(`Skills loaded (${String(result.loaded ?? 0)} total).`);
+          return;
+        }
+        this.printLine("Usage: /skill load <root> | /skill reset");
         return;
       }
       case "skills": {
@@ -199,6 +231,23 @@ export class App {
         this.printLine(`✗ unknown command /${parsed.name} — /help lists commands`);
       }
     }
+  }
+
+  private async request(operation: string, payload: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+    const response = await this.options.transport.request({
+      version: PROTOCOL_VERSION,
+      request_id: `tui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+      session_id: this.options.sessionId,
+      operation,
+      payload,
+    });
+    return (response.payload ?? {}) as Record<string, unknown>;
+  }
+
+  private async setMode(mode: ReturnType<typeof parseMode>): Promise<void> {
+    const result = await this.request("session.mode", { mode });
+    if (result.mode !== mode) throw new Error("sidecar returned a different mode");
+    this.options.router.setMode(this.options.sessionId, mode);
   }
 
   private async submitTurn(text: string): Promise<void> {

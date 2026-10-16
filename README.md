@@ -45,10 +45,16 @@ This builds the workspace and launches the AgentProlog TUI over the Nix-pinned P
 | `/direct` `/symbolic` `/symbolic-recursive` | Switch the session's reasoning mode (canonical router transition) |
 | `/mode [name]` | Show or set the reasoning mode |
 | `/skills` | List skills loaded into the runtime catalog |
+| `/skill load <root>` | Add project skills through the canonical confined catalog |
+| `/skill reset` | Return to the runtime's core skills |
+| `/tools` | List tools registered for this session |
+| `/status` | Inspect the sidecar's session id, mode, and running state |
 | `/clear` `/quit` | Clear the transcript / exit |
 | any other text | Submitted as one canonical Prolog-RLM turn in the current mode |
 
 Ctrl+C cancels a running turn (`session.cancel` → the Prolog cancellation token); Ctrl+C or Ctrl+D on idle exits. Model selection comes from `AGENTPROLOG_MODEL` or `OPENROUTER_MODEL`; a live turn additionally needs an OpenRouter-compatible key in the environment (`.env` is loaded automatically).
+
+Each session registers the pinned runtime's bounded `project_read` tool against its admitted working directory. Direct mode grants this read capability with recursion disabled; skills do not grant tools. Reads still enter the Prolog-RLM tool authority and confinement path. Other coding tools and the upstream `/auto` mode contract remain separate work.
 
 ### Skills
 
