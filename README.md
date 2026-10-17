@@ -54,6 +54,8 @@ This builds the workspace and launches the AgentProlog TUI over the Nix-pinned P
 
 Ctrl+C cancels a running turn (`session.cancel` → the Prolog cancellation token); Ctrl+C or Ctrl+D on idle exits. Model selection comes from `AGENTPROLOG_MODEL` or `OPENROUTER_MODEL`; a live turn additionally needs an OpenRouter-compatible key in the environment (`.env` is loaded automatically).
 
+The TUI resumes one durable Prolog-RLM conversation per workspace. It stores data in a private `agentprolog` directory under `$XDG_STATE_HOME` or `~/.local/state`; override the database path with `AGENTPROLOG_CONVERSATION_STORE` or choose a separate session identity with `AGENTPROLOG_SESSION_ID`. The next turn uses the saved conversation context, while old terminal output is not replayed into the screen. The saved conversation is local user data; recent writes are flushed when the sidecar closes cleanly. When using the DSH plugin directly, set `AGENTPROLOG_CONVERSATION_STORE` in its `env` config to opt into the same durable store; without it, the sidecar uses an in-memory store. A resumed session starts in canonical `direct` mode.
+
 Each session registers the pinned runtime's bounded `project_read` tool against its admitted working directory. Direct mode grants this read capability with recursion disabled; skills do not grant tools. Reads still enter the Prolog-RLM tool authority and confinement path. Other coding tools and the upstream `/auto` mode contract remain separate work.
 
 ### Skills

@@ -49,11 +49,14 @@ export class App {
     return this.options.sessionId;
   }
 
-  banner(info: { runtime: string; protocolVersion: number; skills: readonly string[]; sidecar: string }): void {
+  banner(info: { runtime: string; protocolVersion: number; skills: readonly string[]; sidecar: string; sessionId?: string; resumed?: boolean }): void {
     const { output, tty } = this.options;
     const line = (text: string): void => void output.write(`${text}\n`);
     line(`${dim(tty, "AgentProlog TUI")} — prolog-rlm runtime (protocol v${info.protocolVersion})`);
     line(dim(tty, `sidecar: ${info.sidecar}`));
+    if (info.sessionId) {
+      line(dim(tty, `session: ${info.sessionId} (${info.resumed ? "resumed" : "new"})`));
+    }
     if (info.skills.length > 0) {
       line(dim(tty, `skills: ${info.skills.join(", ")}`));
     }

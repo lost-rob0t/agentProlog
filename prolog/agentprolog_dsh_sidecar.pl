@@ -49,7 +49,8 @@ main(_) :-
     setup_call_cleanup(open_runtime, request_loop, close_runtime).
 
 open_runtime :-
-    rlm_conversation:conversation_store_open(memory, Outcome),
+    conversation_store_spec(StoreSpec),
+    rlm_conversation:conversation_store_open(StoreSpec, Outcome),
     require_ok(store_open, Outcome, Store),
     assertz(sidecar_store(Store)),
     % The catalog starts from the runtime default (prolog-rlm's core
@@ -58,6 +59,12 @@ open_runtime :-
     rlm_skill:skill_default_catalog(DefaultOutcome),
     require_skill_outcome(DefaultOutcome, DefaultCatalog),
     assertz(sidecar_skill_catalog(DefaultCatalog)).
+
+conversation_store_spec(persist(File)) :-
+    getenv('AGENTPROLOG_CONVERSATION_STORE', File),
+    File \== "",
+    !.
+conversation_store_spec(memory).
 
 close_runtime :-
     cancel_all_turns,
@@ -143,21 +150,42 @@ session_start(Frame) :-
 session_start_(Frame) :-
     SessionId = Frame.session_id,
     (   sidecar_session(SessionId, _)
-    ->  reply_ok(Frame, _{started:false, already_started:true})
+    ->  sidecar_mode(SessionId, Mode),
+        reply_ok(Frame, _{started:false, already_started:true, resumed:false, mode:Mode})
     ;   sidecar_store(Store),
-        session_tool_registry(Frame, Registry),
-        rlm_conversation:conversation_create(Store, [id(SessionId)], Outcome),
-        (   Outcome = ok(Conversation)
+        session_project_root(Frame, Root),
+        session_conversation(Store, SessionId, Root, Conversation, Resumed),
+        session_tool_registry(Root, Registry),
+        (   nonvar(Conversation)
         ->  assertz(sidecar_tool_registry(SessionId, Registry)),
             assertz(sidecar_session(SessionId, Conversation)),
             assertz(sidecar_mode(SessionId, "direct")),
-            reply_ok(Frame, _{started:true, already_started:false, mode:"direct"})
-        ;   rlm_tool:tool_registry_destroy(Registry),
-            reply_runtime_outcome(Frame, session_start, Outcome)
+            reply_ok(Frame, _{started:true, already_started:false, resumed:Resumed, mode:"direct"})
         )
     ).
 
-session_tool_registry(Frame, Registry) :-
+session_conversation(Store, SessionId, Root, Conversation, Resumed) :-
+    rlm_conversation:conversation_open(Store, SessionId, OpenOutcome),
+    (   OpenOutcome = ok(Existing)
+    ->  (   get_dict(metadata, Existing, Metadata),
+            get_dict(project_root, Metadata, Root)
+        ->  Conversation = Existing,
+            Resumed = true
+        ;   throw(error(session_project_root_mismatch(SessionId), _))
+        )
+    ;   OpenOutcome = error(Error),
+        get_dict(detail, Error, not_found(_))
+    ->  rlm_conversation:conversation_create(
+            Store,
+            [id(SessionId), metadata(_{project_root:Root})],
+            CreateOutcome),
+        require_ok(session_create, CreateOutcome, Conversation),
+        Resumed = false
+    ;   require_ok(session_open, OpenOutcome, Conversation),
+        Resumed = true
+    ).
+
+session_project_root(Frame, Root) :-
     payload_dict(Frame, Payload),
     (   get_dict(cwd, Payload, Cwd), Cwd \== null
     ->  ( string(Cwd), Cwd \== "" -> true
@@ -165,7 +193,9 @@ session_tool_registry(Frame, Registry) :-
     ;   Cwd = '.'
     ),
     absolute_file_name(Cwd, Root,
-                       [file_type(directory), access(read), file_errors(error)]),
+                       [file_type(directory), access(read), file_errors(error)]).
+
+session_tool_registry(Root, Registry) :-
     rlm_tool:tool_registry_create(Registry),
     (   rlm_tool:register_project_read_tool(Registry, Root,
                                             [max_file_bytes(8192)], ok(_))
