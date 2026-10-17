@@ -10,8 +10,9 @@ interface Harness {
   readonly output: { text: string };
   readonly sent: RequestFrame[];
   readonly stopped: string[];
-  respondTo: (requestId: string, overrides: Partial<{ status: string; text: string; skills: Array<{ name: string; description: string }>; error: { code: string; message: string } }>) => void;
-  respondLast: (overrides?: Partial<{ status: string; text: string; skills: Array<{ name: string; description: string }>; error: { code: string; message: string } }>) => void;
+  deferInspect: () => void;
+  respondTo: (requestId: string, overrides: Partial<{ status: string; text: string; skills: Array<{ name: string; description: string }>; error: { code: string; message: string }; payload: Record<string, unknown> }>) => void;
+  respondLast: (overrides?: Partial<{ status: string; text: string; skills: Array<{ name: string; description: string }>; error: { code: string; message: string }; payload: Record<string, unknown> }>) => void;
   quit: Promise<void>;
 }
 
@@ -19,10 +20,11 @@ function makeHarness(): Harness {
   const sent: RequestFrame[] = [];
   const stopped: string[] = [];
   const outputBuffer = { text: "" };
+  let deferInspection = false;
 
   const respondTo: Harness["respondTo"] = (requestId, overrides) => {
     const request = sent.find(frame => frame.request_id === requestId);
-    const payload: Record<string, unknown> =
+    const payload: Record<string, unknown> = overrides.payload ?? (
       request?.operation === "session.mode"
         ? { mode: request.payload.mode }
         : request?.operation === "session.inspect"
@@ -33,7 +35,7 @@ function makeHarness(): Harness {
         ? { skills: overrides.skills }
         : overrides.status === undefined || overrides.status === "ok"
           ? { text: overrides.text ?? "symbolic reply" }
-          : {};
+          : {});
     bridge.receive({
       version: PROTOCOL_VERSION,
       request_id: requestId,
@@ -49,7 +51,8 @@ function makeHarness(): Harness {
       sent.push(frame);
       // Lifecycle operations settle immediately, mirroring the sidecar; turns
       // and skill listings are test-driven through respondTo/respondLast.
-      if (["session.start", "session.cancel", "session.mode", "session.inspect", "tool.list", "skill.reset"].includes(frame.operation)) {
+      if (["session.start", "session.cancel", "session.mode", "session.inspect", "tool.list", "skill.reset"].includes(frame.operation) &&
+          !(frame.operation === "session.inspect" && deferInspection)) {
         queueMicrotask(() => respondTo(frame.request_id, { text: "unused" }));
       }
     },
@@ -99,7 +102,7 @@ function makeHarness(): Harness {
   });
   app.run(() => quitResolve());
 
-  return { app, output: outputBuffer, sent, stopped, respondTo, respondLast, quit };
+  return { app, output: outputBuffer, sent, stopped, deferInspect: () => { deferInspection = true; }, respondTo, respondLast, quit };
 }
 
 async function until(predicate: () => boolean): Promise<void> {
@@ -133,6 +136,26 @@ describe("TUI app", () => {
     expect(app["options"].router.resolveMode("s1")).toBe("direct");
     await app.handleLine("/quit");
     await quit;
+  });
+
+  it("does not guess mode or idle state from incomplete canonical inspection", async () => {
+    const harness = makeHarness();
+    harness.deferInspect();
+    const status = harness.app.handleLine("/status");
+    await until(() => harness.sent.some(frame => frame.operation === "session.inspect"));
+    harness.respondLast({ payload: { session_id: "s1", mode: "direct" } });
+    await status;
+    expect(harness.output.text).toContain("[invalid_session_state]");
+    expect(harness.output.text).not.toContain("· idle");
+
+    const mode = harness.app.handleLine("/mode");
+    await until(() => harness.sent.filter(frame => frame.operation === "session.inspect").length === 2);
+    harness.respondLast({ payload: { session_id: "s1", busy: false } });
+    await mode;
+    expect(harness.output.text).toContain("[invalid_session_state]");
+    expect(harness.output.text).not.toContain("Mode: undefined");
+    await harness.app.handleLine("/quit");
+    await harness.quit;
   });
 
   it("a message submits a canonical turn through the router's mode", async () => {

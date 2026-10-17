@@ -7,6 +7,7 @@ import {
   ModeRouter,
   parseMode,
   PROTOCOL_VERSION,
+  ProtocolError,
   type Bridge,
   type RequestFrame,
 } from "@agentprolog/dsh";
@@ -168,13 +169,13 @@ export class App {
           this.printLine(`◈ Mode: ${parsed.args}`);
           return;
         }
-        const state = await this.request("session.inspect");
-        this.printLine(`Mode: ${String(state.mode)}`);
+        const state = await this.inspectSession();
+        this.printLine(`Mode: ${state.mode}`);
         return;
       }
       case "status": {
-        const state = await this.request("session.inspect");
-        this.printLine(`Session: ${String(state.session_id)} · mode: ${String(state.mode)} · ${state.busy ? "running" : "idle"}`);
+        const state = await this.inspectSession();
+        this.printLine(`Session: ${state.session_id} · mode: ${state.mode} · ${state.busy ? "running" : "idle"}`);
         return;
       }
       case "tools": {
@@ -242,6 +243,18 @@ export class App {
       payload,
     });
     return (response.payload ?? {}) as Record<string, unknown>;
+  }
+
+  private async inspectSession(): Promise<{ session_id: string; mode: string; busy: boolean }> {
+    const state = await this.request("session.inspect");
+    if (
+      state.session_id !== this.options.sessionId ||
+      !isMode(state.mode) ||
+      typeof state.busy !== "boolean"
+    ) {
+      throw new ProtocolError("invalid_session_state", "sidecar returned incomplete or mismatched session inspection");
+    }
+    return { session_id: state.session_id, mode: state.mode, busy: state.busy };
   }
 
   private async setMode(mode: ReturnType<typeof parseMode>): Promise<void> {
