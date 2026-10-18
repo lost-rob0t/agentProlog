@@ -4,7 +4,7 @@ Status: draft. Stacked on PR #48.
 
 AgentProlog exposes `direct-rlm` over the shared Prolog-RLM completion runtime. This mode admits bounded RLM child operations (depth at most 2), unlike `direct` (depth 0). It does not yet claim to invoke the distinct upstream `rlm_direct/4` native-loop strategy. That requires a reviewed canonical managed-native-turn entrypoint upstream.
 
-The TUI accepts per-turn overrides through `/budget`; defaults remain Prolog-RLM's values. The upstream 8192 limit is a **completion execution token budget**, not a provider context window. Explicit overrides cannot bypass the mode recursion ceilings.
+The TUI accepts per-mode, per-session overrides through `/budget`; defaults remain Prolog-RLM's values. A setting in `/symbolic` does not affect `/direct` or `/direct-rlm`. The upstream 8192 limit is a **completion execution token budget**, not a provider context window. Explicit overrides cannot bypass the mode recursion ceilings.
 
 Structured token-budget errors retain `kind`, `used` and `limit`. Explicit AgentProlog skills/tools inventory questions in the TUI resolve to the canonical catalog rather than infer runtime skills from conversation instructions.
 
