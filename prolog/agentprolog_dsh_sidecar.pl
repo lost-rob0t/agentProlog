@@ -29,6 +29,7 @@ cancellation, and malformed frames fail closed; nothing silently restarts.
 :- use_module(library(rlm_tool), []).
 
 :- dynamic sidecar_store/1.
+:- dynamic sidecar_store_lock/1.
 :- dynamic sidecar_session/2.
 :- dynamic sidecar_mode/2.
 :- dynamic sidecar_turn/3.
@@ -49,7 +50,11 @@ main(_) :-
     setup_call_cleanup(open_runtime, request_loop, close_runtime).
 
 open_runtime :-
+    catch(open_runtime_, Error, (close_runtime, throw(Error))).
+
+open_runtime_ :-
     conversation_store_spec(StoreSpec),
+    acquire_conversation_store_lock(StoreSpec),
     rlm_conversation:conversation_store_open(StoreSpec, Outcome),
     require_ok(store_open, Outcome, Store),
     assertz(sidecar_store(Store)),
@@ -66,6 +71,20 @@ conversation_store_spec(persist(File)) :-
     !.
 conversation_store_spec(memory).
 
+% SWI persistency serializes individual journal writes, not the read/sequence/
+% append transaction across processes. Hold a separate advisory lock for the
+% sidecar lifetime, before attaching the journal. Never unlink the lock file:
+% OS stream cleanup releases ownership even on an ungraceful process exit.
+acquire_conversation_store_lock(memory).
+acquire_conversation_store_lock(persist(File)) :-
+    absolute_file_name(File, Absolute, [access(none), file_errors(error)]),
+    ( read_link(Absolute, _, Target) -> Canonical = Target ; Canonical = Absolute ),
+    atom_concat(Canonical, '.lock', LockFile),
+    catch(open(LockFile, append, Lock, [lock(write), wait(false)]),
+          error(permission_error(lock, _, _), _),
+          throw(error(conversation_store_locked(Canonical), _))),
+    assertz(sidecar_store_lock(Lock)).
+
 close_runtime :-
     cancel_all_turns,
     (   retract(sidecar_store(Store))
@@ -79,7 +98,8 @@ close_runtime :-
     retractall(sidecar_event_seq(_, _, _)),
     retractall(sidecar_skill_catalog(_)),
     forall(retract(sidecar_tool_registry(_, Registry)),
-           rlm_tool:tool_registry_destroy(Registry)).
+           rlm_tool:tool_registry_destroy(Registry)),
+    forall(retract(sidecar_store_lock(Lock)), close(Lock)).
 
 request_loop :-
     read_line_to_string(user_input, Line),
