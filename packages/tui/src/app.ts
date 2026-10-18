@@ -183,6 +183,9 @@ export class App {
       case "status": {
         const state = await this.inspectSession();
         this.printLine(`Session: ${state.session_id} · mode: ${state.mode} · ${state.busy ? "running" : "idle"}`);
+        if (typeof state.compaction === "object" && state.compaction !== null && "state" in state.compaction) {
+          this.printLine("Compaction: " + String(state.compaction.state));
+        }
         return;
       }
       case "budget": {
@@ -215,6 +218,19 @@ export class App {
         }
         overrides[key] = Number(raw);
         this.printLine("Budget override: " + key + "=" + raw + " (next turn)");
+        return;
+      }
+      case "kb": {
+        const result = await this.request("session.kb");
+        const rows = Array.isArray(result.observations) ? result.observations : [];
+        this.printLine("Project KB: " + String(result.count ?? rows.length) + " model-derived observations");
+        for (const row of rows) {
+          if (typeof row === "object" && row !== null &&
+              typeof row.kind === "string" && typeof row.text === "string") {
+            this.printLine("• " + row.kind + " — " + row.text);
+          }
+        }
+        if (result.truncated === true) this.printLine("… truncated to 100 observations");
         return;
       }
       case "tools": {
@@ -284,7 +300,7 @@ export class App {
     return (response.payload ?? {}) as Record<string, unknown>;
   }
 
-  private async inspectSession(): Promise<{ session_id: string; mode: string; busy: boolean }> {
+  private async inspectSession(): Promise<{ session_id: string; mode: string; busy: boolean; compaction?: { state: string } }> {
     const state = await this.request("session.inspect");
     if (
       state.session_id !== this.options.sessionId ||
@@ -293,7 +309,10 @@ export class App {
     ) {
       throw new ProtocolError("invalid_session_state", "sidecar returned incomplete or mismatched session inspection");
     }
-    return { session_id: state.session_id, mode: state.mode, busy: state.busy };
+    return { session_id: state.session_id, mode: state.mode, busy: state.busy,
+      ...(typeof state.compaction === "object" && state.compaction !== null &&
+          typeof (state.compaction as Record<string, unknown>).state === "string"
+        ? { compaction: state.compaction as { state: string } } : {}) };
   }
 
   private async setMode(mode: ReturnType<typeof parseMode>): Promise<void> {
@@ -320,6 +339,11 @@ export class App {
       spinner.stop();
       this.printLine(`⏺ ${outcome.text}`);
       this.printLine(dim(this.options.tty, `  ${outcome.provider}/${outcome.model ?? "default"} · mode: ${outcome.mode}`));
+      const compaction = outcome.meta?.compaction;
+      if (typeof compaction === "object" && compaction !== null && "state" in compaction &&
+          (compaction.state === "published" || compaction.state === "failed")) {
+        this.printLine("Compaction: " + String(compaction.state));
+      }
     } catch (error) {
       spinner.stop();
       this.printError(error);
