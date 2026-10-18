@@ -42,6 +42,7 @@ describe("TUI input parsing", () => {
     expect(help).toContain("/direct");
     expect(help).toContain("/direct-rlm");
     expect(help).toContain("/budget");
+    expect(help).toContain("/kb");
     expect(help).toContain("/symbolic");
     expect(help).toContain("/symbolic-recursive");
     expect(help).toContain("/mode");
