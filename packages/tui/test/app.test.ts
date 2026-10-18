@@ -2,7 +2,7 @@ import { PassThrough, Writable } from "node:stream";
 
 import { describe, expect, it } from "vitest";
 
-import { Bridge, executeTurnViaBridge, ModeRouter, PROTOCOL_VERSION, type RequestFrame } from "@agentprolog/dsh";
+import { Bridge, executeTurnViaBridge, ModeRouter, PROTOCOL_VERSION, type RequestFrame, type AgentPrologMode } from "@agentprolog/dsh";
 import { App } from "../src/app.js";
 
 interface Harness {
@@ -19,7 +19,8 @@ interface Harness {
 function makeHarness(): Harness {
   const sent: RequestFrame[] = [];
   const stopped: string[] = [];
-  const budgetOverrides: Record<string, number> = {};
+  const budgetsByMode: Partial<Record<AgentPrologMode, Record<string, number>>> = {};
+  const budgetOverridesFor = (mode: AgentPrologMode): Record<string, number> => (budgetsByMode[mode] ??= {});
   const outputBuffer = { text: "" };
   let deferInspection = false;
 
@@ -79,7 +80,7 @@ function makeHarness(): Harness {
         sessionId: request.sessionId,
         text: request.text,
         mode,
-        options: { ...budgetOverrides },
+        options: { ...budgetOverridesFor(mode) },
       }),
   });
 
@@ -102,7 +103,7 @@ function makeHarness(): Harness {
     input: new PassThrough(),
     output,
     tty: false,
-    budgetOverrides,
+    budgetOverridesFor,
   });
   app.run(() => quitResolve());
 
@@ -142,6 +143,10 @@ describe("TUI app", () => {
     expect(output.text).toContain("max_total_tokens=20480");
     expect(output.text).toContain("max_model_calls=8");
     expect(output.text).toContain("Usage: /budget");
+    await app.handleLine("/direct-rlm");
+    await app.handleLine("/budget");
+    expect(output.text).toContain("Budget (direct-rlm): runtime defaults");
+    await app.handleLine("/direct");
     const pending = app.handleLine("short request");
     await until(() => sent.some(frame => frame.operation === "session.turn"));
     expect(sent.find(frame => frame.operation === "session.turn")!.payload).toMatchObject({
@@ -151,7 +156,7 @@ describe("TUI app", () => {
     await pending;
     await app.handleLine("/budget reset");
     await app.handleLine("/budget");
-    expect(output.text).toContain("runtime defaults");
+    expect(output.text).toContain("Budget (direct): runtime defaults");
     await app.handleLine("/quit");
     await quit;
   });
