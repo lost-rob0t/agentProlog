@@ -30,6 +30,8 @@ function makeHarness(): Harness {
         ? { mode: request.payload.mode }
         : request?.operation === "session.inspect"
           ? { session_id: request.session_id, mode: "direct", busy: false }
+        : request?.operation === "session.kb"
+          ? { observations: [{ kind: "facts", text: "a project observation" }], count: 1, truncated: false }
         : request?.operation === "tool.list"
           ? { tools: [{ name: "project_read", description: "Read a project file" }] }
       : overrides.skills !== undefined
@@ -52,7 +54,7 @@ function makeHarness(): Harness {
       sent.push(frame);
       // Lifecycle operations settle immediately, mirroring the sidecar; turns
       // and skill listings are test-driven through respondTo/respondLast.
-      if (["session.start", "session.cancel", "session.mode", "session.inspect", "tool.list", "skill.reset"].includes(frame.operation) &&
+      if (["session.start", "session.cancel", "session.mode", "session.inspect", "session.kb", "tool.list", "skill.reset"].includes(frame.operation) &&
           !(frame.operation === "session.inspect" && deferInspection)) {
         queueMicrotask(() => respondTo(frame.request_id, { text: "unused" }));
       }
@@ -262,6 +264,16 @@ describe("TUI app", () => {
     await pending;
     expect(output.text).toContain("• rlm-operate");
     expect(sent.filter(frame => frame.operation === "session.turn")).toHaveLength(0);
+    await app.handleLine("/quit");
+    await quit;
+  });
+
+  it("reads the bounded project KB from the canonical sidecar", async () => {
+    const { app, output, sent, quit } = makeHarness();
+    await app.handleLine("/kb");
+    expect(sent.map(frame => frame.operation)).toContain("session.kb");
+    expect(output.text).toContain("Project KB: 1 model-derived observations");
+    expect(output.text).toContain("facts — a project observation");
     await app.handleLine("/quit");
     await quit;
   });
