@@ -79,7 +79,8 @@ conversation_store_spec(memory).
 warm_store_spec(persist(WarmFile)) :-
     getenv('AGENTPROLOG_CONVERSATION_STORE', File),
     File \== "", !,
-    format(string(WarmFile), '~w.warm.db', [File]).
+    ( string(File) -> FileText = File ; atom_string(File, FileText) ),
+    string_concat(FileText, ".warm.db", WarmFile).
 warm_store_spec(memory).
 
 close_runtime :-
