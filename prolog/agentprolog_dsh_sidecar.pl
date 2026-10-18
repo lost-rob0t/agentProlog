@@ -42,6 +42,7 @@ cancellation, and malformed frames fail closed; nothing silently restarts.
 protocol_version(1).
 
 valid_mode("direct").
+valid_mode("direct-rlm").
 valid_mode("symbolic").
 valid_mode("symbolic-recursive").
 
@@ -113,7 +114,7 @@ dispatch_operation("runtime.describe", Frame) :- !,
                runtime:"prolog-rlm",
                transport:"ndjson-stdio",
                canonical_turn:"rlm_conversation_runtime:conversation_turn/4",
-               modes:["direct", "symbolic", "symbolic-recursive"],
+               modes:["direct", "direct-rlm", "symbolic", "symbolic-recursive"],
                capabilities:_{conversation:true,
                               cancellation:true,
                               agent_factory:true,
@@ -293,10 +294,9 @@ run_turn_guarded(Frame, Conversation, Token, Mode) :-
         emit_event(Frame.session_id, Frame.request_id, "turn_finished", _{status:"ok", mode:Mode}),
         reply_ok(Frame, Payload)
     ;   Outcome = error(Error)
-    ->  safe_term_string(Error, Text),
-        error_code(Error, Code),
+    ->  turn_error_details(Error, Code, Details),
         emit_event(Frame.session_id, Frame.request_id, "turn_finished", _{status:"error", mode:Mode, code:Code}),
-        reply_error(Frame, Code, _{message:Text})
+        reply_error(Frame, Code, Details)
     ;   Outcome = exception(Error)
     ->  safe_term_string(Error, Text),
         emit_event(Frame.session_id, Frame.request_id, "turn_finished", _{status:"error", mode:Mode, code:"runtime_exception"}),
@@ -333,7 +333,8 @@ completion_options(Mode, Payload, Token, Frame, Options) :-
     base_completion_options(Token, Frame, Provider, Base),
     mode_options(Mode, Base, Options0),
     apply_budget_updates_or_keep(Options0, Payload, Options1),
-    skill_options(Payload, Options1, Options).
+    enforce_mode_recursion(Mode, Options1, Options2),
+    skill_options(Payload, Options2, Options).
 
 apply_budget_updates_or_keep(Options0, Payload, Options) :-
     payload_budget_updates(Payload, Updates),
@@ -388,6 +389,15 @@ mode_options("direct", Base, Options) :- !,
             child_capabilities([model(openrouter), tool(project_read)]),
             budget(_{max_recursion_depth:0})],
            Options).
+mode_options("direct-rlm", Base, Options) :- !,
+    % Preserve canonical completion message projection with bounded RLM children.
+    append(Base,
+           [capabilities([rlm, model(openrouter), tool(project_read),
+                          context(peek), context(slice), context(search)]),
+            child_capabilities([rlm, model(openrouter), tool(project_read),
+                                context(peek), context(slice), context(search)]),
+            budget(_{max_recursion_depth:2})],
+           Options).
 mode_options("symbolic", Base, Options) :- !,
     % Runtime defaults: root supervisor may select typed plans; child plans
     % are model-only, so recursion stays at depth 1.
@@ -432,13 +442,29 @@ budget_value(Name, Raw, Value) :-
     ).
 
 apply_budget_updates(Options0, Updates, Options) :-
-    (   member(budget(Budget0), Options0)
-    ->  exclude(is_budget_option, Options0, Rest)
-    ;   rlm_completion:default_completion_budget(Budget0),
+    rlm_completion:default_completion_budget(Default),
+    (   member(budget(Partial), Options0)
+    ->  exclude(is_budget_option, Options0, Rest),
+        put_dict(Partial, Default, Budget0)
+    ;   Budget0 = Default,
         Options0 = Rest
     ),
     put_dict(Updates, Budget0, Budget),
     Options = [budget(Budget)|Rest].
+
+mode_recursion_ceiling("direct", 0).
+mode_recursion_ceiling("direct-rlm", 2).
+mode_recursion_ceiling("symbolic", 1).
+mode_recursion_ceiling("symbolic-recursive", 2).
+
+enforce_mode_recursion(Mode, Options, Options) :-
+    (   member(budget(Budget), Options),
+        get_dict(max_recursion_depth, Budget, Depth),
+        mode_recursion_ceiling(Mode, Ceiling),
+        Depth > Ceiling
+    ->  throw(error(invalid_mode_recursion(Mode, Depth, Ceiling), _))
+    ;   true
+    ).
 
 is_budget_option(budget(_)).
 
@@ -474,6 +500,22 @@ turn_payload(Turn, Model, Mode, Payload) :-
 %% Structured error classification: budget exhaustion is surfaced as its own
 %% code so callers never parse Prolog terms to distinguish exhausted turns
 %% from generic failures.
+turn_error_details(Error, "budget_exhausted", Details) :-
+    sub_term(Sub, Error),
+    is_dict(Sub),
+    get_dict(kind, Sub, token_budget_exceeded),
+    get_dict(limit, Sub, Limit),
+    get_dict(used, Sub, Used),
+    integer(Limit), integer(Used), !,
+    format(string(Message), "completion token budget exceeded (~d/~d tokens)", [Used, Limit]),
+    Details = _{message:Message, kind:"token_budget_exceeded", limit:Limit, used:Used}.
+turn_error_details(Error, Code, _{message:Text}) :-
+    error_code(Error, Code),
+    safe_term_string(Error, Text).
+
+error_code(Error, "budget_exhausted") :-
+    ( sub_term(Sub, Error), is_dict(Sub),
+      get_dict(kind, Sub, token_budget_exceeded) ), !.
 error_code(Error, "budget_exhausted") :-
     contains_ground_term(Error, max_iterations), !.
 error_code(Error, "budget_exhausted") :-
