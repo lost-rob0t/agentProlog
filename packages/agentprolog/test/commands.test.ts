@@ -24,10 +24,11 @@ function makeRegistry() {
 }
 
 describe("mode commands", () => {
-  it("registers exactly /direct, /symbolic, /symbolic-recursive", () => {
+  it("registers all four canonical mode commands", () => {
     const { definitions } = makeRegistry();
     expect(definitions.map(definition => definition.name)).toEqual([
       "direct",
+      "direct-rlm",
       "symbolic",
       "symbolic-recursive",
     ]);
@@ -39,6 +40,9 @@ describe("mode commands", () => {
 
     expect(await dispatch("direct", session)).toEqual({ kind: "success", text: "Mode: direct" });
     expect(router.resolveMode("session-a")).toBe("direct");
+
+    expect(await dispatch("direct-rlm", session)).toEqual({ kind: "success", text: "Mode: direct-rlm" });
+    expect(router.resolveMode("session-a")).toBe("direct-rlm");
 
     expect(await dispatch("symbolic", session)).toEqual({ kind: "success", text: "Mode: symbolic" });
     expect(router.resolveMode("session-a")).toBe("symbolic");
