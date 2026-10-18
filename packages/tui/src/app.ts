@@ -10,6 +10,7 @@ import {
   ProtocolError,
   type Bridge,
   type RequestFrame,
+  type AgentPrologMode,
 } from "@agentprolog/dsh";
 import { helpText, parseInput, resolveModeCommand, inventoryCommand } from "./commands.js";
 import { dim, Spinner } from "./render.js";
@@ -28,7 +29,7 @@ export interface AppOptions {
   readonly output: NodeJS.WritableStream;
   readonly tty: boolean;
   /** Shared with the canonical turn adapter; optional for embedding hosts. */
-  readonly budgetOverrides?: Record<string, number>;
+  readonly budgetOverridesFor?: (mode: AgentPrologMode) => Record<string, number>;
 }
 
 /**
@@ -189,19 +190,20 @@ export class App {
         return;
       }
       case "budget": {
-        const overrides = this.options.budgetOverrides;
+        const mode = this.options.router.resolveMode(this.options.sessionId);
+        const overrides = this.options.budgetOverridesFor?.(mode);
         if (!overrides) {
           this.printLine("Budget controls unavailable in this frontend.");
           return;
         }
         if (!parsed.args) {
           const entries = Object.entries(overrides).map(([key, value]) => key + "=" + value);
-          this.printLine(entries.length ? "Budget overrides: " + entries.join(", ") : "Budget: runtime defaults (8192 total tokens upstream)");
+          this.printLine(entries.length ? "Budget overrides (" + mode + "): " + entries.join(", ") : "Budget (" + mode + "): runtime defaults (8192 total tokens upstream)");
           return;
         }
         if (parsed.args === "reset") {
           for (const key of Object.keys(overrides)) delete overrides[key];
-          this.printLine("Budget: runtime defaults restored.");
+          this.printLine("Budget (" + mode + "): runtime defaults restored.");
           return;
         }
         const [field, raw, ...extra] = parsed.args.split(/\s+/u);
@@ -217,7 +219,7 @@ export class App {
           return;
         }
         overrides[key] = Number(raw);
-        this.printLine("Budget override: " + key + "=" + raw + " (next turn)");
+        this.printLine("Budget override (" + mode + "): " + key + "=" + raw + " (next turn in this mode)");
         return;
       }
       case "kb": {
