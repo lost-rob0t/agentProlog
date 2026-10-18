@@ -14,6 +14,7 @@ describe.skipIf(!SIDECAR)("headless sidecar integration (real Prolog process, ke
     expect(description.payload.runtime).toBe("prolog-rlm");
     expect(description.payload.protocol_version).toBe(1);
     expect(description.payload.capabilities).toMatchObject({ modes: true, cancellation: true });
+    expect(description.payload.modes).toContain("direct-rlm");
     await transport.stop("test end");
   }, 30000);
 
