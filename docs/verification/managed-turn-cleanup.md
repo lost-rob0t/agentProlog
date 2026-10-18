@@ -1,6 +1,6 @@
 # Managed-turn cleanup verification
 
-Upstream pin: `504e71b38d0f34b9a655b08620cdf5a00edcf2e9` (draft prolog-rlm #519).
+Upstream pin: `3aa863d6d128236416b9e08105e772a3845c46d1` (merged prolog-rlm #519).
 The NAR hash was calculated from its clean git archive with Nix 2.26.3.
 The same procedure reproduced the previous lock's hash exactly. Nix fetched
 and evaluated the new locked source without a hash mismatch.
@@ -29,7 +29,7 @@ Upstream runtime head `9735394` CI passed: CI 39138195954, Nix 39138196009, clea
 39138195950, Tree-sitter 39138196007. Paid OpenRouter 39138195955 was skipped.
 Local upstream deterministic corpus passed 1290 tests; benchmarks passed 16/16
 and 15/15. No live provider credential was available locally. Fake callbacks
-and fixture usage are not live-provider evidence. Live validation remains unrun; the upstream merge gate remains blocked.
+and fixture usage are not live-provider evidence. Live validation remains unrun and is a manual, spending-capped release gate.
 
 The first downstream CI run passed Nix sidecar packaging and all TypeScript
 checks, then failed the new Prolog catalog regression: the bare upstream pack
