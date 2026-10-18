@@ -45,6 +45,7 @@ export function helpText(): string {
     "/skill reset          reset to the runtime's core skills",
     "/tools                list tools registered for this session",
     "/status               inspect canonical session state",
+    "/kb                   inspect model-derived project KB observations",
     "/budget               show per-turn budget overrides",
     "/budget <field> <n>   set tokens, model-calls, tool-calls, or iterations",
     "/budget reset         restore runtime budget defaults",
