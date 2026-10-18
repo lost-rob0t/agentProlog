@@ -22,9 +22,12 @@ Production derives new immutable warm artifacts and reuses their
 representation-selected context on the managed turn. Old messages stay
 durable and cold-addressable, including when generation fails.
 The model-based generator may incur **an additional completion** with
-its own budget; there is not yet a joint token/cost reservation with
-the enclosing managed turn. Failures are reported as compaction status
-and are not silently treated as successful compaction.
+its own budget (8192 execution tokens, at most 4 model calls, recursion depth
+zero); there is not yet a joint token/cost reservation with the enclosing
+managed turn. The generator receives only its provider, cancellation token,
+and opaque context-read capabilities, **not** coding tools, the project read
+registry, active skills, or recursive child authority. Failures are reported
+as compaction status and are not silently treated as successful compaction.
 
 A sidecar companion artifact store is derived from the admitted
 private conversation store path with suffix `.warm.db`.
