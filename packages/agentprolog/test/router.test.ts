@@ -37,16 +37,19 @@ describe("ModeRouter", () => {
     expect(router.resolveMode("session-a")).toBe("symbolic");
   });
 
-  it("switches to direct, symbolic, and symbolic-recursive", () => {
+  it("switches to every canonical mode", () => {
     const { router, modeChanges } = makeRouter();
     expect(router.setMode("s1", "direct")).toBe("direct");
     expect(router.resolveMode("s1")).toBe("direct");
+    expect(router.setMode("s1", "direct-rlm")).toBe("direct-rlm");
+    expect(router.resolveMode("s1")).toBe("direct-rlm");
     expect(router.setMode("s1", "symbolic")).toBe("symbolic");
     expect(router.resolveMode("s1")).toBe("symbolic");
     expect(router.setMode("s1", "symbolic-recursive")).toBe("symbolic-recursive");
     expect(router.resolveMode("s1")).toBe("symbolic-recursive");
     expect(modeChanges.map(change => `${change.from}->${change.to}`)).toEqual([
-      "direct->symbolic",
+      "direct->direct-rlm",
+      "direct-rlm->symbolic",
       "symbolic->symbolic-recursive",
     ]);
   });
@@ -73,15 +76,18 @@ describe("ModeRouter", () => {
     const { router, executed } = makeRouter();
     router.setMode("s-symbolic", "symbolic");
     router.setMode("s-recursive", "symbolic-recursive");
+    router.setMode("s-direct-rlm", "direct-rlm");
 
     await router.executeTurn({ sessionId: "s-direct", text: "hello" });
     await router.executeTurn({ sessionId: "s-symbolic", text: "plan this" });
     await router.executeTurn({ sessionId: "s-recursive", text: "decompose" });
+    await router.executeTurn({ sessionId: "s-direct-rlm", text: "inspect" });
 
     expect(executed.map(call => `${call.sessionId}:${call.mode}`)).toEqual([
       "s-direct:direct",
       "s-symbolic:symbolic",
       "s-recursive:symbolic-recursive",
+      "s-direct-rlm:direct-rlm",
     ]);
   });
 
