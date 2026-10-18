@@ -84,8 +84,10 @@ test(skill_options_are_canonical_and_consumed) :-
         ( rlm_skill:skill_default_catalog(ok(Catalog)),
           assertz(agentprolog_dsh_sidecar:sidecar_skill_catalog(Catalog)) ),
         ( agentprolog_dsh_sidecar:skill_options(
-              _{explicit_skills:["rlm-operate"], disabled_skills:["rlm-facts"]}, [], Options),
+              _{skill_mode:"off", explicit_skills:["rlm-operate"], disabled_skills:["rlm-facts"]}, [], Options),
           assertion(is_list(Options)),
+          rlm_completion:option_value(skill_mode, Options, on, SkillMode),
+          assertion(SkillMode == off),
           rlm_completion:option_value(explicit_skills, Options, [], Selected),
           assertion(Selected == ["rlm-operate"]),
           rlm_completion:option_value(disabled_skills, Options, [], Disabled),
