@@ -7,6 +7,7 @@ import {
   ModeRouter,
   parseMode,
   PROTOCOL_VERSION,
+  ProtocolError,
   type Bridge,
   type RequestFrame,
 } from "@agentprolog/dsh";
@@ -48,11 +49,14 @@ export class App {
     return this.options.sessionId;
   }
 
-  banner(info: { runtime: string; protocolVersion: number; skills: readonly string[]; sidecar: string }): void {
+  banner(info: { runtime: string; protocolVersion: number; skills: readonly string[]; sidecar: string; sessionId?: string; resumed?: boolean }): void {
     const { output, tty } = this.options;
     const line = (text: string): void => void output.write(`${text}\n`);
     line(`${dim(tty, "AgentProlog TUI")} — prolog-rlm runtime (protocol v${info.protocolVersion})`);
     line(dim(tty, `sidecar: ${info.sidecar}`));
+    if (info.sessionId) {
+      line(dim(tty, `session: ${info.sessionId} (${info.resumed ? "resumed" : "new"})`));
+    }
     if (info.skills.length > 0) {
       line(dim(tty, `skills: ${info.skills.join(", ")}`));
     }
@@ -153,7 +157,7 @@ export class App {
   private async handleCommand(parsed: { name: string; args: string }): Promise<void> {
     const modeCommand = resolveModeCommand(parsed.name);
     if (modeCommand) {
-      this.options.router.setMode(this.options.sessionId, modeCommand);
+      await this.setMode(modeCommand);
       this.printLine(`◈ Mode: ${modeCommand}`);
       return;
     }
@@ -164,11 +168,43 @@ export class App {
             this.printLine(`✗ unknown mode "${parsed.args}" — one of: direct, symbolic, symbolic-recursive`);
             return;
           }
-          this.options.router.setMode(this.options.sessionId, parseMode(parsed.args));
+          await this.setMode(parseMode(parsed.args));
           this.printLine(`◈ Mode: ${parsed.args}`);
           return;
         }
-        this.printLine(`Mode: ${this.options.router.resolveMode(this.options.sessionId)}`);
+        const state = await this.inspectSession();
+        this.printLine(`Mode: ${state.mode}`);
+        return;
+      }
+      case "status": {
+        const state = await this.inspectSession();
+        this.printLine(`Session: ${state.session_id} · mode: ${state.mode} · ${state.busy ? "running" : "idle"}`);
+        return;
+      }
+      case "tools": {
+        const result = await this.request("tool.list");
+        const tools = Array.isArray(result.tools) ? result.tools : [];
+        if (tools.length === 0) this.printLine("No tools registered for this session.");
+        for (const tool of tools) {
+          if (typeof tool === "object" && tool !== null && typeof tool.name === "string") {
+            this.printLine(`• ${tool.name}${typeof tool.description === "string" ? ` — ${tool.description}` : ""}`);
+          }
+        }
+        return;
+      }
+      case "skill": {
+        if (parsed.args === "reset") {
+          const result = await this.request("skill.reset");
+          this.printLine(`Skills reset (${Array.isArray(result.skills) ? result.skills.length : 0} core skills).`);
+          return;
+        }
+        if (parsed.args.startsWith("load ") && parsed.args.slice(5).trim()) {
+          const path = parsed.args.slice(5).trim();
+          const result = await this.request("skill.load", { roots: [{ source: "project", path }] });
+          this.printLine(`Skills loaded (${String(result.loaded ?? 0)} total).`);
+          return;
+        }
+        this.printLine("Usage: /skill load <root> | /skill reset");
         return;
       }
       case "skills": {
@@ -199,6 +235,35 @@ export class App {
         this.printLine(`✗ unknown command /${parsed.name} — /help lists commands`);
       }
     }
+  }
+
+  private async request(operation: string, payload: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+    const response = await this.options.transport.request({
+      version: PROTOCOL_VERSION,
+      request_id: `tui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+      session_id: this.options.sessionId,
+      operation,
+      payload,
+    });
+    return (response.payload ?? {}) as Record<string, unknown>;
+  }
+
+  private async inspectSession(): Promise<{ session_id: string; mode: string; busy: boolean }> {
+    const state = await this.request("session.inspect");
+    if (
+      state.session_id !== this.options.sessionId ||
+      !isMode(state.mode) ||
+      typeof state.busy !== "boolean"
+    ) {
+      throw new ProtocolError("invalid_session_state", "sidecar returned incomplete or mismatched session inspection");
+    }
+    return { session_id: state.session_id, mode: state.mode, busy: state.busy };
+  }
+
+  private async setMode(mode: ReturnType<typeof parseMode>): Promise<void> {
+    const result = await this.request("session.mode", { mode });
+    if (result.mode !== mode) throw new Error("sidecar returned a different mode");
+    this.options.router.setMode(this.options.sessionId, mode);
   }
 
   private async submitTurn(text: string): Promise<void> {

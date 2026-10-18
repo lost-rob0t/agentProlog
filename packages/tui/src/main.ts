@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 
 import {
   executeTurnViaBridge,
+  isMode,
   loadSkillRoots,
   ModeRouter,
   PROTOCOL_VERSION,
@@ -11,6 +12,7 @@ import {
   type SkillSummary,
 } from "@agentprolog/dsh";
 import { App } from "./app.js";
+import { prepareConversationStore, workspaceSessionId } from "./persistence.js";
 
 /** Minimal .env reader (KEY=VALUE lines); never overrides existing env. */
 function loadEnvFile(path: string): void {
@@ -38,9 +40,14 @@ async function main(): Promise<number> {
   loadEnvFile(".env");
   const sidecarCommand = process.env.AGENTPROLOG_SIDECAR ?? "agentprolog-sidecar";
   const model = process.env.AGENTPROLOG_MODEL ?? process.env.OPENROUTER_MODEL ?? null;
-  const sessionId = `tui-${Date.now().toString(36)}`;
+  const projectRoot = process.cwd();
+  const sessionId = process.env.AGENTPROLOG_SESSION_ID ?? workspaceSessionId(projectRoot);
+  const conversationStore = prepareConversationStore(process.env, undefined, projectRoot);
 
-  const transport = new SidecarTransport({ command: sidecarCommand });
+  const transport = new SidecarTransport({
+    command: sidecarCommand,
+    env: { AGENTPROLOG_CONVERSATION_STORE: conversationStore },
+  });
   let description: Awaited<ReturnType<SidecarTransport["start"]>>;
   try {
     description = await transport.start();
@@ -53,13 +60,18 @@ async function main(): Promise<number> {
     return 1;
   }
 
-  await transport.request({
+  const started = await transport.request({
     version: PROTOCOL_VERSION,
     request_id: `start-${Date.now().toString(36)}`,
     session_id: sessionId,
     operation: "session.start",
-    payload: { cwd: process.cwd() },
+    payload: { cwd: projectRoot },
   });
+  const startPayload = started.payload as Record<string, unknown> | undefined;
+  if (!startPayload || !isMode(startPayload.mode) || typeof startPayload.resumed !== "boolean") {
+    await transport.stop("invalid session start response");
+    throw new Error("sidecar returned incomplete session start state");
+  }
 
   const skillRoots = skillRootsFromEnv(process.env.AGENTPROLOG_SKILLS, [
     directoryExists("skills") ? "skills" : "",
@@ -100,6 +112,8 @@ async function main(): Promise<number> {
     protocolVersion: description.payload.protocol_version,
     skills: skills.map(skill => skill.name),
     sidecar: sidecarCommand,
+    sessionId,
+    resumed: startPayload.resumed,
   });
 
   if (process.env.AGENTPROLOG_VERBOSE) {

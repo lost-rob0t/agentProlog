@@ -19,6 +19,7 @@ const BASE_OPERATIONS: ReadonlySet<string> = new Set([
   "skill.load",
   "skill.list",
   "skill.reset",
+  "tool.list",
 ]);
 
 const EXPERIMENT_OPERATIONS: ReadonlySet<string> = new Set([

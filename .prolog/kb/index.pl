@@ -1,0 +1,2 @@
+:- consult(architecture).
+:- consult(tooling).

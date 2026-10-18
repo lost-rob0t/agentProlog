@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { SidecarTransport } from "../src/sidecar.js";
 
@@ -12,6 +15,51 @@ describe.skipIf(!SIDECAR)("headless sidecar integration (real Prolog process, ke
     expect(description.payload.protocol_version).toBe(1);
     expect(description.payload.capabilities).toMatchObject({ modes: true, cancellation: true });
     await transport.stop("test end");
+  }, 30000);
+
+  it("reopens the same persistent conversation after a sidecar restart", async () => {
+    const sandbox = mkdtempSync(join(tmpdir(), "agentprolog-resume-"));
+    const store = join(sandbox, "conversation.db");
+    const sessionId = "resume-integration";
+    const first = new SidecarTransport({ command: SIDECAR!, env: { AGENTPROLOG_CONVERSATION_STORE: store } });
+    const second = new SidecarTransport({ command: SIDECAR!, env: { AGENTPROLOG_CONVERSATION_STORE: store } });
+    try {
+      await first.start();
+      const created = await first.request({
+        version: 1, request_id: "resume-create", session_id: sessionId, operation: "session.start",
+        payload: { cwd: process.cwd() },
+      });
+      expect(created.payload).toMatchObject({ started: true, resumed: false, mode: "direct" });
+      await expect(first.request({
+        version: 1, request_id: "live-wrong-root", session_id: sessionId, operation: "session.start",
+        payload: { cwd: sandbox },
+      })).rejects.toMatchObject({ code: "runtime_error", message: /session_project_root_mismatch/ });
+      const repeated = await first.request({
+        version: 1, request_id: "live-same-root", session_id: sessionId, operation: "session.start",
+        payload: { cwd: process.cwd() },
+      });
+      expect(repeated.payload).toMatchObject({ started: false, already_started: true });
+      await first.stop("restart boundary");
+
+      await second.start();
+      await expect(second.request({
+        version: 1, request_id: "resume-wrong-root", session_id: sessionId, operation: "session.start",
+        payload: { cwd: sandbox },
+      })).rejects.toMatchObject({ code: "runtime_error", message: /session_project_root_mismatch/ });
+      const resumed = await second.request({
+        version: 1, request_id: "resume-open", session_id: sessionId, operation: "session.start",
+        payload: { cwd: process.cwd() },
+      });
+      expect(resumed.payload).toMatchObject({ started: true, resumed: true, mode: "direct" });
+      const inspected = await second.request({
+        version: 1, request_id: "resume-inspect", session_id: sessionId, operation: "session.inspect", payload: {},
+      });
+      expect(inspected.payload).toMatchObject({ session_id: sessionId, busy: false, mode: "direct" });
+    } finally {
+      await first.stop("test cleanup");
+      await second.stop("test cleanup");
+      rmSync(sandbox, { recursive: true, force: true });
+    }
   }, 30000);
 
   it("rejects session operations before session.start", async () => {
@@ -56,6 +104,21 @@ describe.skipIf(!SIDECAR)("headless sidecar integration (real Prolog process, ke
       payload: { mode: string };
     };
     expect(inspectAfter.payload.mode).toBe("symbolic-recursive");
+    await transport.stop("test end");
+  }, 30000);
+
+  it("registers a confined project-read tool for each session", async () => {
+    const transport = new SidecarTransport({ command: SIDECAR! });
+    await transport.start();
+    await transport.request({ version: 1, request_id: "ts1", session_id: "tools", operation: "session.start", payload: { cwd: process.cwd() } });
+    const listed = (await transport.request({ version: 1, request_id: "ts2", session_id: "tools", operation: "tool.list", payload: {} })) as {
+      payload: { tools: Array<{ name: string }> };
+    };
+    expect(listed.payload.tools.map(tool => tool.name)).toEqual(["project_read"]);
+    await expect(transport.request({
+      version: 1, request_id: "ts3", session_id: "missing-root", operation: "session.start",
+      payload: { cwd: "/path/that/does/not/exist" },
+    })).rejects.toMatchObject({ code: "runtime_error", runtimeCode: "runtime_exception" });
     await transport.stop("test end");
   }, 30000);
 

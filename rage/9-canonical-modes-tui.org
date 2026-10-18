@@ -1,0 +1,4 @@
+* Run identity
+- Consumed issue :: #9
+- Branch :: =rage/9-canonical-modes-tui=
+- RAGE start commit :: =9fecdbbd7fe1ad983465ba3632adfc5cef28dbd6=
