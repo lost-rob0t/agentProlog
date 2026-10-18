@@ -10,6 +10,7 @@ import {
   SidecarTransport,
   skillRootsFromEnv,
   type SkillSummary,
+  type AgentPrologMode,
 } from "@agentprolog/dsh";
 import { App } from "./app.js";
 import { prepareConversationStore, workspaceSessionId } from "./persistence.js";
@@ -89,14 +90,17 @@ async function main(): Promise<number> {
     }
   }
 
-  const budgetOverrides: Record<string, number> = {};
+  const budgetsByMode: Partial<Record<AgentPrologMode, Record<string, number>>> = {};
+  const budgetOverridesFor = (mode: AgentPrologMode): Record<string, number> => {
+    return (budgetsByMode[mode] ??= {});
+  };
   const router = new ModeRouter({
     execute: (request, mode) =>
       executeTurnViaBridge(transport.activeBridge!, {
         sessionId: request.sessionId,
         text: request.text,
         mode,
-        options: { provider: "openrouter", ...(model === null ? {} : { model }), ...budgetOverrides },
+        options: { provider: "openrouter", ...(model === null ? {} : { model }), ...budgetOverridesFor(mode) },
       }),
   });
 
@@ -107,7 +111,7 @@ async function main(): Promise<number> {
     input: process.stdin,
     output: process.stdout,
     tty: Boolean(process.stdout.isTTY),
-    budgetOverrides,
+    budgetOverridesFor,
   });
   app.banner({
     runtime: String(description.payload.runtime),
