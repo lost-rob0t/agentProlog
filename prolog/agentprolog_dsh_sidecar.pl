@@ -21,6 +21,7 @@ cancellation, and malformed frames fail closed; nothing silently restarts.
 
 :- use_module(library(http/json)).
 :- use_module(library(readutil)).
+:- use_module(library(lists)).
 :- use_module(library(rlm_chain), []).
 :- use_module(library(rlm_artifact), []).
 :- use_module(library(rlm_conversation_warm), []).
