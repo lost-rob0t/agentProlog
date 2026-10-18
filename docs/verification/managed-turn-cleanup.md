@@ -9,7 +9,7 @@ Local verification on 2026-10-18 used Node 24.19.0, the project's pnpm 10.28.0,
 and SWI-Prolog 9.2.9 installed into an isolated workspace toolchain.
 
 - Build and strict typecheck passed.
-- Plugin: 73 tests passed, including real sidecar process integration.
+- Plugin: 76 tests passed, including real sidecar process integration.
 - TUI: 22 tests passed, including real sidecar integration.
 - Prolog sidecar: 11 tests passed, including all four managed modes with native
   or symbolic deterministic model callbacks, real project-read schemas,
@@ -44,3 +44,10 @@ references, serializes same-process summary publication, preserves incoming hist
 on failed compaction, and retains known compaction usage across failure. Sidecar,
 bridge and TUI preserve that separate usage on errors; unknown usage stays unknown.
 Independent OS processes sharing one store are not covered by the mutex guarantee.
+
+Prerequisite #48 integration adds live-session project-root consistency and an
+exclusive process-lifetime persistent-store lock before conversation/warm-store
+attachment. Fresh-process tests reject competing and symlink-alias writers,
+verify graceful/SIGKILL release, and preserve actual incoming history on restart.
+Combined validation passes 98 TypeScript tests and 11 Prolog tests, build and
+strict typecheck with the installed merged runtime. Paid calls remain unrun.

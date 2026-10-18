@@ -1,6 +1,6 @@
 # ADR 0004 — Managed native turns and separate budgets
 
-Status: integrating the PR #48 prerequisite; pinned to merged upstream PR #519.
+Status: PR #48 prerequisite integrated; pinned to merged upstream PR #519.
 
 `direct` and `direct-rlm` invoke the canonical managed `strategy(native)` path,
 which uses `rlm_direct/4`. Direct grants project reads and opaque result
