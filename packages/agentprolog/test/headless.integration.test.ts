@@ -15,6 +15,7 @@ describe.skipIf(!SIDECAR)("headless sidecar integration (real Prolog process, ke
     expect(description.payload.protocol_version).toBe(1);
     expect(description.payload.capabilities).toMatchObject({ modes: true, cancellation: true });
     expect(description.payload.modes).toContain("direct-rlm");
+    expect(description.payload.capabilities).toMatchObject({ context_kb: true });
     await transport.stop("test end");
   }, 30000);
 
@@ -51,6 +52,20 @@ describe.skipIf(!SIDECAR)("headless sidecar integration (real Prolog process, ke
       await first.stop("test cleanup");
       await second.stop("test cleanup");
       rmSync(sandbox, { recursive: true, force: true });
+    }
+  }, 30000);
+
+  it("exposes an empty read-only project KB in a fresh session", async () => {
+    const transport = new SidecarTransport({ command: SIDECAR! });
+    try {
+      await transport.start();
+      await transport.request({ version: 1, request_id: "kb-start", session_id: "kb-new",
+        operation: "session.start", payload: { cwd: process.cwd() } });
+      const kb = await transport.request({ version: 1, request_id: "kb-read", session_id: "kb-new",
+        operation: "session.kb", payload: {} });
+      expect(kb.payload).toMatchObject({ observations: [], count: 0, truncated: false });
+    } finally {
+      await transport.stop("kb test cleanup");
     }
   }, 30000);
 
