@@ -76,7 +76,7 @@ function fakeTransportFactory() {
 }
 
 describe("agentProlog DSH plugin", () => {
-  it("mounts exactly one factory, the service, and the three commands", async () => {
+  it("mounts exactly one factory, the service, and the four commands", async () => {
     const ctx = makeFakeContext();
     const { Transport, instances } = fakeTransportFactory();
     const service = await apply(ctx as unknown as never, config(), { Transport });
@@ -85,6 +85,7 @@ describe("agentProlog DSH plugin", () => {
     expect(ctx.services.get("agentprolog")).toBe(service);
     expect(ctx.commands?.registered.map(command => command.name)).toEqual([
       "direct",
+      "direct-rlm",
       "symbolic",
       "symbolic-recursive",
     ]);
