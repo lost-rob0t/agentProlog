@@ -7,7 +7,7 @@ import { ModeError } from "./errors.js";
  * through {@link parseMode} / {@link isMode}, and the sidecar validates the
  * same closed set.
  */
-export const AGENTPROLOG_MODES = ["direct", "symbolic", "symbolic-recursive"] as const;
+export const AGENTPROLOG_MODES = ["direct", "direct-rlm", "symbolic", "symbolic-recursive"] as const;
 
 export type AgentPrologMode = (typeof AGENTPROLOG_MODES)[number];
 
