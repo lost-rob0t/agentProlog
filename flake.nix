@@ -9,7 +9,7 @@
     # public `prolog_rlm` pack built by that flake; bump this pin together
     # with the exact upstream head recorded in the PR verification evidence.
     prolog-rlm = {
-      url = "github:lost-rob0t/prolog-rlm/d4e639e93f7598f2ba4735daac1cd4ad62355a8b";
+      url = "github:lost-rob0t/prolog-rlm/504e71b38d0f34b9a655b08620cdf5a00edcf2e9";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -21,7 +21,7 @@
         swiProlog = pkgs.swi-prolog;
         prologRlm = prolog-rlm.packages.${system}.prolog-rlm;
         prologRlmPack = "${prologRlm}/share/swi-prolog/pack";
-        prologRlmRev = "d4e639e93f7598f2ba4735daac1cd4ad62355a8b";
+        prologRlmRev = "504e71b38d0f34b9a655b08620cdf5a00edcf2e9";
 
         # Persistent Prolog sidecar consumed by the DSH plugin as
         # config.command. The wrapper pins both the SWI-Prolog build and the

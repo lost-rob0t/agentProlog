@@ -23,5 +23,5 @@ project registry, active skills or recursive authority.
 
 `/kb` remains a read-only projection of attributable model claims, not trusted
 executable facts. Native-loop deterministic tests do not establish live
-provider behavior. Credentialed live tests, multi-writer publication safety,
+provider behavior. Credentialed live tests, cross-process publication safety,
 and full project semantic materialization remain unverified or out of scope.

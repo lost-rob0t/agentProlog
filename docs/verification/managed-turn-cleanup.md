@@ -1,6 +1,6 @@
 # Managed-turn cleanup verification
 
-Upstream pin: `d4e639e93f7598f2ba4735daac1cd4ad62355a8b` (draft prolog-rlm #519).
+Upstream pin: `504e71b38d0f34b9a655b08620cdf5a00edcf2e9` (draft prolog-rlm #519).
 The NAR hash was calculated from its clean git archive with Nix 2.26.3.
 The same procedure reproduced the previous lock's hash exactly. Nix fetched
 and evaluated the new locked source without a hash mismatch.
@@ -11,7 +11,7 @@ and SWI-Prolog 9.2.9 installed into an isolated workspace toolchain.
 - Build and strict typecheck passed.
 - Plugin: 73 tests passed, including real sidecar process integration.
 - TUI: 22 tests passed, including real sidecar integration.
-- Prolog sidecar: 9 tests passed, including all four managed modes with native
+- Prolog sidecar: 11 tests passed, including all four managed modes with native
   or symbolic deterministic model callbacks, real project-read schemas,
   confined file reads, skill option consumption, and preserved history.
 - A built CLI session using the installed-copy sidecar showed `Mode: symbolic`,
@@ -29,7 +29,7 @@ Upstream runtime head `9735394` CI passed: CI 39138195954, Nix 39138196009, clea
 39138195950, Tree-sitter 39138196007. Paid OpenRouter 39138195955 was skipped.
 Local upstream deterministic corpus passed 1290 tests; benchmarks passed 16/16
 and 15/15. No live provider credential was available locally. Fake callbacks
-and fixture usage are not live-provider evidence. No merge is authorized.
+and fixture usage are not live-provider evidence. Live validation remains unrun; the upstream merge gate remains blocked.
 
 The first downstream CI run passed Nix sidecar packaging and all TypeScript
 checks, then failed the new Prolog catalog regression: the bare upstream pack
@@ -37,3 +37,10 @@ used by the dev shell had no skills. The upstream pack now owns `skills/` and
 checks its default catalog outside the source tree. The downstream duplicate
 skill copy is removed, and its pack-load check also requires that catalog.
 Final-head CI results are recorded in the PR description.
+
+Adversarial review follow-up: the pinned runtime passes 1296/1296 deterministic tests.
+It includes incoming text in pressure estimates, recognizes persisted summary source
+references, serializes same-process summary publication, preserves incoming history
+on failed compaction, and retains known compaction usage across failure. Sidecar,
+bridge and TUI preserve that separate usage on errors; unknown usage stays unknown.
+Independent OS processes sharing one store are not covered by the mutex guarantee.
