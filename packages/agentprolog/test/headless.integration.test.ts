@@ -30,6 +30,15 @@ describe.skipIf(!SIDECAR)("headless sidecar integration (real Prolog process, ke
         payload: { cwd: process.cwd() },
       });
       expect(created.payload).toMatchObject({ started: true, resumed: false, mode: "direct" });
+      await expect(first.request({
+        version: 1, request_id: "live-wrong-root", session_id: sessionId, operation: "session.start",
+        payload: { cwd: sandbox },
+      })).rejects.toMatchObject({ code: "runtime_error", message: /session_project_root_mismatch/ });
+      const repeated = await first.request({
+        version: 1, request_id: "live-same-root", session_id: sessionId, operation: "session.start",
+        payload: { cwd: process.cwd() },
+      });
+      expect(repeated.payload).toMatchObject({ started: false, already_started: true });
       await first.stop("restart boundary");
 
       await second.start();

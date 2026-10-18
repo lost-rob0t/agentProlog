@@ -149,11 +149,12 @@ session_start(Frame) :-
 
 session_start_(Frame) :-
     SessionId = Frame.session_id,
-    (   sidecar_session(SessionId, _)
-    ->  sidecar_mode(SessionId, Mode),
+    session_project_root(Frame, Root),
+    (   sidecar_session(SessionId, Existing)
+    ->  require_session_project_root(Existing, SessionId, Root),
+        sidecar_mode(SessionId, Mode),
         reply_ok(Frame, _{started:false, already_started:true, resumed:false, mode:Mode})
     ;   sidecar_store(Store),
-        session_project_root(Frame, Root),
         session_conversation(Store, SessionId, Root, Conversation, Resumed),
         session_tool_registry(Root, Registry),
         (   nonvar(Conversation)
@@ -167,12 +168,9 @@ session_start_(Frame) :-
 session_conversation(Store, SessionId, Root, Conversation, Resumed) :-
     rlm_conversation:conversation_open(Store, SessionId, OpenOutcome),
     (   OpenOutcome = ok(Existing)
-    ->  (   get_dict(metadata, Existing, Metadata),
-            get_dict(project_root, Metadata, Root)
-        ->  Conversation = Existing,
-            Resumed = true
-        ;   throw(error(session_project_root_mismatch(SessionId), _))
-        )
+    ->  require_session_project_root(Existing, SessionId, Root),
+        Conversation = Existing,
+        Resumed = true
     ;   OpenOutcome = error(Error),
         get_dict(detail, Error, not_found(_))
     ->  rlm_conversation:conversation_create(
@@ -183,6 +181,12 @@ session_conversation(Store, SessionId, Root, Conversation, Resumed) :-
         Resumed = false
     ;   require_ok(session_open, OpenOutcome, Conversation),
         Resumed = true
+    ).
+
+require_session_project_root(Conversation, SessionId, Root) :-
+    ( get_dict(metadata, Conversation, Metadata), get_dict(project_root, Metadata, Root)
+    -> true
+    ; throw(error(session_project_root_mismatch(SessionId), _))
     ).
 
 session_project_root(Frame, Root) :-
