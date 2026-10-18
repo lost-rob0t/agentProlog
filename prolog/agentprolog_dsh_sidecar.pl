@@ -354,9 +354,9 @@ skill_options(Payload, Options0, Options) :-
     skill_mode_option(Payload, ModeOption),
     skill_names_option(explicit_skills, Payload, ExplicitOption),
     skill_names_option(disabled_skills, Payload, DisabledOption),
-    append([CatalogOption, ModeOption, ExplicitOption, DisabledOption], Options0, Options).
+    append([CatalogOption, ModeOption, ExplicitOption, DisabledOption, Options0], Options).
 
-skill_catalog_option(skill_catalog(Catalog)) :-
+skill_catalog_option([skill_catalog(Catalog)]) :-
     sidecar_skill_catalog(Catalog),
     rlm_skill:skill_catalog_skills(Catalog, [_|_]),
     !.
@@ -372,13 +372,13 @@ skill_mode_option(Payload, [skill_mode(Mode)]) :-
     ).
 skill_mode_option(_, []).
 
-skill_names_option(Key, Payload, [Key=Names]) :-
+skill_names_option(Key, Payload, [Option]) :-
     get_dict(Key, Payload, Raw),
     Raw \== null,
     !,
     (   is_list(Raw),
         maplist(skill_name_string, Raw, Names)
-    ->  true
+    ->  Option =.. [Key, Names]
     ;   throw(error(invalid_skill_names(Key, Raw), _))
     ).
 skill_names_option(_, _, []).
@@ -399,7 +399,9 @@ mode_options("symbolic", Base, Options) :- !,
 mode_options("symbolic-recursive", Base, Options) :- !,
     % Child plans may select symbolic work themselves; the depth ceiling
     % below (and prolog-rlm's own budget validation) bounds the recursion.
-    append(Base, [child_capabilities([rlm,
+    append(Base, [capabilities([rlm, model(openrouter), tool(project_read),
+                               context(peek), context(slice), context(search)]),
+                  child_capabilities([rlm,
                                    model(openrouter),
                                    tool(project_read),
                                    context(peek),
