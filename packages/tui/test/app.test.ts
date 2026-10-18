@@ -74,6 +74,7 @@ function makeHarness(): Harness {
   };
 
   const router = new ModeRouter({
+    defaultMode: "direct",
     execute: (request, mode) =>
       // Exercise the real adapter so error classification matches production.
       executeTurnViaBridge(bridge, {

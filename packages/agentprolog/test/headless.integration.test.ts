@@ -31,7 +31,7 @@ describe.skipIf(!SIDECAR)("headless sidecar integration (real Prolog process, ke
         version: 1, request_id: "resume-create", session_id: sessionId, operation: "session.start",
         payload: { cwd: process.cwd() },
       });
-      expect(created.payload).toMatchObject({ started: true, resumed: false, mode: "direct" });
+      expect(created.payload).toMatchObject({ started: true, resumed: false, mode: "symbolic" });
       await first.stop("restart boundary");
 
       await second.start();
@@ -43,11 +43,11 @@ describe.skipIf(!SIDECAR)("headless sidecar integration (real Prolog process, ke
         version: 1, request_id: "resume-open", session_id: sessionId, operation: "session.start",
         payload: { cwd: process.cwd() },
       });
-      expect(resumed.payload).toMatchObject({ started: true, resumed: true, mode: "direct" });
+      expect(resumed.payload).toMatchObject({ started: true, resumed: true, mode: "symbolic" });
       const inspected = await second.request({
         version: 1, request_id: "resume-inspect", session_id: sessionId, operation: "session.inspect", payload: {},
       });
-      expect(inspected.payload).toMatchObject({ session_id: sessionId, busy: false, mode: "direct" });
+      expect(inspected.payload).toMatchObject({ session_id: sessionId, busy: false, mode: "symbolic" });
     } finally {
       await first.stop("test cleanup");
       await second.stop("test cleanup");
@@ -87,12 +87,12 @@ describe.skipIf(!SIDECAR)("headless sidecar integration (real Prolog process, ke
     const started = (await transport.request({ version: 1, request_id: "s1", session_id: "sess-1", operation: "session.start", payload: {} })) as {
       payload: { mode: string };
     };
-    expect(started.payload.mode).toBe("direct");
+    expect(started.payload.mode).toBe("symbolic");
 
     const setSymbolic = (await transport.request({
       version: 1, request_id: "s2", session_id: "sess-1", operation: "session.mode", payload: { mode: "symbolic" },
     })) as { payload: { mode: string; previous: string } };
-    expect(setSymbolic.payload).toMatchObject({ mode: "symbolic", previous: "direct" });
+    expect(setSymbolic.payload).toMatchObject({ mode: "symbolic", previous: "symbolic" });
 
     const setRecursive = (await transport.request({
       version: 1, request_id: "s3", session_id: "sess-1", operation: "session.mode", payload: { mode: "symbolic-recursive" },

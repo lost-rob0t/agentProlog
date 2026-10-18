@@ -11,8 +11,8 @@ export const AGENTPROLOG_MODES = ["direct", "direct-rlm", "symbolic", "symbolic-
 
 export type AgentPrologMode = (typeof AGENTPROLOG_MODES)[number];
 
-/** Deterministic session default: the lowest-overhead path. */
-export const DEFAULT_MODE: AgentPrologMode = "direct";
+/** Deterministic session default: symbolic-first supervision. */
+export const DEFAULT_MODE: AgentPrologMode = "symbolic";
 
 export function isMode(value: unknown): value is AgentPrologMode {
   return typeof value === "string" && (AGENTPROLOG_MODES as readonly string[]).includes(value);

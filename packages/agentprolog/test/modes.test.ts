@@ -7,8 +7,8 @@ describe("agentProlog modes", () => {
     expect([...AGENTPROLOG_MODES]).toEqual(["direct", "direct-rlm", "symbolic", "symbolic-recursive"]);
   });
 
-  it("defaults to direct", () => {
-    expect(DEFAULT_MODE).toBe("direct");
+  it("defaults to symbolic", () => {
+    expect(DEFAULT_MODE).toBe("symbolic");
   });
 
   it("parses every supported mode", () => {

@@ -71,23 +71,27 @@ One session-scoped router resolves exactly one backend per turn. Mode transition
 | Command | Mode | Execution |
 | --- | --- | --- |
 | `/direct` | `direct` | Bounded non-symbolic turn through the canonical Prolog-RLM conversation boundary. No symbolic planning, no recursion: the sidecar grants no `rlm` capability and caps recursion depth at 0. |
-| `/direct-rlm` | `direct-rlm` | Direct-or-plan completion path with bounded recursive child operations (depth <= 2) on the same managed message projection. Not yet native `rlm_direct/4` parity. |
+| `/direct-rlm` | `direct-rlm` | Canonical native tool loop (`rlm_direct/4`) with bounded recursive child operations (depth <= 2) over managed conversation context. |
 | `/symbolic` | `symbolic` | The Prolog-RLM direct-or-plan supervisor: typed symbolic plans, one recursion level (runtime defaults). |
 | `/symbolic-recursive` | `symbolic-recursive` | Bounded recursive RLM decomposition: child plans may select symbolic work, with an explicit `max_recursion_depth` budget on top of Prolog-RLM's own iteration/budget ceilings. |
 
-The default mode is `direct`. Modes are validated against a closed set; unknown modes are rejected, never coerced. Symbolic failures propagate as structured, fail-closed errors — there is **no** silent fallback to direct mode.
+The default mode is `symbolic`. Modes are validated against a closed set; unknown modes are rejected, never coerced. Symbolic failures propagate as structured, fail-closed errors — there is **no** silent fallback to direct mode.
 
 ### Automatic warm context and project KB projection
 
-`/direct` and `/direct-rlm` reuse Prolog-RLM's existing immutable
-conversation/warm-artifact stores. After at least 24 old unprocessed messages
-become eligible, the sidecar derives a warm artifact covering up to 48 old
-messages; the latest 12 remain hot. The default is on; disable via
-`AGENTPROLOG_AUTO_WARM=0`. Compaction costs an additional bounded model call
-sequence (at most 4 model calls, 8,192 execution tokens). It may fail without
-interrupting the user's turn; `/status` and turn metadata report failures.
-The generator can read bounded opaque conversation context but does not
-inherit project tools, skills or recursive authority.
+All modes reuse the canonical immutable conversation and warm-artifact stores.
+Automatic warm publication runs only under estimated context pressure, in
+batches of at most 48 old messages, keeping the latest 12 hot. It fills gaps
+before existing partial summaries. `AGENTPROLOG_AUTO_WARM=0` disables it.
+The complete source transcript stays durable and cold-addressable; there is
+no lifetime message cap or forced reset. Context that fits keeps every
+unsummarized message. Under pressure, the runtime bounds solver candidates.
+
+Warm generation uses a separate bounded completion (4 calls, 8192 execution
+tokens, no project tools, active skills or recursive authority). Its usage is
+reported separately in turn compaction metadata. Failures fail closed through
+the managed runtime. Context-pressure estimates exclude the pending new user
+message, so an unusually large new message can still fail the context gate.
 
 Published summaries are not executable clauses. `/kb` shows a read-only
 Prolog-derived, project-scoped observation projection from the model claims,

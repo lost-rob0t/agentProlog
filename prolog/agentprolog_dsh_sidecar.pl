@@ -184,8 +184,8 @@ session_start_(Frame) :-
         (   nonvar(Conversation)
         ->  assertz(sidecar_tool_registry(SessionId, Registry)),
             assertz(sidecar_session(SessionId, Conversation)),
-            assertz(sidecar_mode(SessionId, "direct")),
-            reply_ok(Frame, _{started:true, already_started:false, resumed:Resumed, mode:"direct"})
+            assertz(sidecar_mode(SessionId, "symbolic")),
+            reply_ok(Frame, _{started:true, already_started:false, resumed:Resumed, mode:"symbolic"})
         )
     ).
 
@@ -246,7 +246,7 @@ session_mode_(Frame) :-
     (   sidecar_session(SessionId, _)
     ->  (   sidecar_mode(SessionId, Previous)
         ->  true
-        ;   Previous = "direct"
+        ;   Previous = "symbolic"
         ),
         retractall(sidecar_mode(SessionId, _)),
         assertz(sidecar_mode(SessionId, Mode)),
@@ -271,7 +271,7 @@ session_turn(Frame) :-
     ).
 
 %% Turn mode resolution order: explicit payload override, session state,
-%% else direct. Unknown modes are rejected before any provider call.
+%% else symbolic. Unknown modes are rejected before any provider call.
 turn_mode(Frame, Mode) :-
     payload_dict(Frame, Payload),
     (   get_dict(mode, Payload, Requested),
@@ -282,7 +282,7 @@ turn_mode(Frame, Mode) :-
         )
     ;   sidecar_mode(Frame.session_id, Mode)
     ->  true
-    ;   Mode = "direct"
+    ;   Mode = "symbolic"
     ).
 
 start_turn_worker(Frame, Conversation, Mode) :-
@@ -332,66 +332,40 @@ run_turn_guarded(Frame, Conversation, Token, Mode) :-
 run_turn_call(Frame, Conversation, Token, Mode, Outcome, Model, Compaction) :-
     payload_dict(Frame, Payload),
     require_payload_text(Payload, text, Text),
-    turn_provider(Payload, Provider, Model),
+    turn_provider(Payload, _, Model),
     completion_options(Mode, Payload, Token, Frame, CompletionOptions),
-    compact_conversation(Conversation, Mode, CompletionOptions, Compaction),
-    retractall(sidecar_compaction_status(Frame.session_id, _)),
-    assertz(sidecar_compaction_status(Frame.session_id, Compaction)),
     sidecar_warm_store(WarmStore),
+    auto_warm_options(CompletionOptions, AutoWarm),
+    mode_strategy(Mode, Strategy),
     rlm_conversation_runtime:conversation_turn(
-        Conversation,
-        message(user, Text),
-        [context_options([warm_store(WarmStore)]),
-         completion_options(CompletionOptions)],
-        Outcome).
+        Conversation, message(user, Text),
+        [strategy(Strategy),
+         context_options([warm_store(WarmStore), auto_warm(AutoWarm)]),
+         completion_options(CompletionOptions)], Outcome),
+    compaction_status(Outcome, Compaction),
+    retractall(sidecar_compaction_status(Frame.session_id, _)),
+    assertz(sidecar_compaction_status(Frame.session_id, Compaction)).
 
-%% AgentProlog uses the pinned canonical warm API. The product only selects
-%% eligible old ranges; generation, validation, provenance and storage belong
-%% to rlm_conversation_warm and rlm_artifact. This compatibility adapter can
-%% be replaced by upstream managed auto_warm once the Nix pin is updated.
-compact_conversation(_, Mode, _, _{state:"not_applicable"}) :-
-    \+ memberchk(Mode, ["direct", "direct-rlm"]), !.
-compact_conversation(_, _, _, _{state:"disabled"}) :-
+mode_strategy("direct", native) :- !.
+mode_strategy("direct-rlm", native) :- !.
+mode_strategy(_, symbolic).
+
+auto_warm_options(_, disabled) :-
     getenv('AGENTPROLOG_AUTO_WARM', Flag),
-    format(string(Text), '~w', [Flag]),
-    memberchk(Text, ["0", "false", "off"]), !.
-compact_conversation(Conversation, _, CompletionOptions, Status) :-
-    catch(compact_conversation_(Conversation, CompletionOptions, Status),
-          Error,
-          ( safe_term_string(Error, Reason),
-            Status = _{state:"failed", reason:Reason} )).
+    memberchk(Flag, ['0', false, off]), !.
+auto_warm_options(Active, [min_batch_messages(1), max_batch_messages(48),
+                           keep_recent_messages(12), completion_options(Safe)]) :-
+    compaction_completion_options(Active, Safe).
 
-compact_conversation_(Conversation, CompletionOptions, Status) :-
-    sidecar_warm_store(WarmStore),
-    rlm_conversation:conversation_stats(Conversation, StatsOutcome),
-    require_ok(warm_stats, StatsOutcome, Stats),
-    rlm_conversation_warm:conversation_warm_list(
-        Conversation, WarmStore, [history(false)], ListOutcome),
-    require_ok(warm_list, ListOutcome, Artifacts),
-    findall(End,
-            ( member(Artifact, Artifacts),
-              get_dict(value, Artifact, Warm),
-              get_dict(source_range, Warm, range(_, End)),
-              integer(End)
-            ),
-            Ends),
-    ( Ends == [] -> Last = 0 ; max_list(Ends, Last) ),
-    % Only cold source messages are eligible. Keep the recent 12 messages hot.
-    Eligible is max(0, Stats.messages-12),
-    Start is Last+1,
-    Available is Eligible-Start+1,
-    ( Available >= 24
-    -> End is min(Eligible, Start+47),
-       compaction_completion_options(CompletionOptions, SafeOptions),
-       rlm_conversation_warm:conversation_warm_publish(
-           Conversation, WarmStore, range(Start, End),
-           [completion_options(SafeOptions)], PublishOutcome),
-       require_ok(warm_publish, PublishOutcome, Published),
-       Status = _{state:"published", start:Start, end:End,
-                  key:Published.artifact.key}
-    ;  Status = _{state:"below_threshold", eligible_through:Eligible,
-                  last_covered:Last}
+compaction_status(ok(Turn), Status) :- !,
+    Warm = Turn.context.auto_warm,
+    ( get_dict(published, Warm, true)
+    -> Warm.source_range = range(Start, End),
+       ( get_dict(usage, Warm.generation, Usage) -> true ; Usage = _{} ),
+       Status = _{state:"published", start:Start, end:End, usage:Usage}
+    ; atom_string(Warm.reason, Reason), Status = _{state:Reason}
     ).
+compaction_status(error(_), _{state:"turn_failed"}).
 
 %% Warm generation only reads the opaque conversation context. It must not
 %% inherit the active coding-agent tool registry, skills, child recursion, or
@@ -483,9 +457,9 @@ skill_options(Payload, Options0, Options) :-
     skill_mode_option(Payload, ModeOption),
     skill_names_option(explicit_skills, Payload, ExplicitOption),
     skill_names_option(disabled_skills, Payload, DisabledOption),
-    append([CatalogOption, ModeOption, ExplicitOption, DisabledOption], Options0, Options).
+    append([CatalogOption, ModeOption, ExplicitOption, DisabledOption, Options0], Options).
 
-skill_catalog_option(skill_catalog(Catalog)) :-
+skill_catalog_option([skill_catalog(Catalog)]) :-
     sidecar_skill_catalog(Catalog),
     rlm_skill:skill_catalog_skills(Catalog, [_|_]),
     !.
@@ -501,13 +475,13 @@ skill_mode_option(Payload, [skill_mode(Mode)]) :-
     ).
 skill_mode_option(_, []).
 
-skill_names_option(Key, Payload, [Key=Names]) :-
+skill_names_option(Key, Payload, [Option]) :-
     get_dict(Key, Payload, Raw),
     Raw \== null,
     !,
     (   is_list(Raw),
         maplist(skill_name_string, Raw, Names)
-    ->  true
+    ->  Option =.. [Key, Names]
     ;   throw(error(invalid_skill_names(Key, Raw), _))
     ).
 skill_names_option(_, _, []).
@@ -517,7 +491,8 @@ skill_name_string(Name, _) :- throw(error(invalid_skill_name(Name), _)).
 
 mode_options("direct", Base, Options) :- !,
     append(Base,
-           [capabilities([model(openrouter), tool(project_read)]),
+           [capabilities([model(openrouter), tool(project_read),
+                          context(peek), context(slice), context(search)]),
             child_capabilities([model(openrouter), tool(project_read)]),
             budget(_{max_recursion_depth:0})],
            Options).
@@ -531,19 +506,13 @@ mode_options("direct-rlm", Base, Options) :- !,
             budget(_{max_recursion_depth:2})],
            Options).
 mode_options("symbolic", Base, Options) :- !,
-    % Runtime defaults: root supervisor may select typed plans; child plans
-    % are model-only, so recursion stays at depth 1.
-    Options = Base.
+    append(Base,
+           [capabilities([rlm, model(openrouter), tool(project_read),
+                          context(peek), context(slice), context(search)]),
+            child_capabilities([model(openrouter), tool(project_read)]),
+            budget(_{max_recursion_depth:1})], Options).
 mode_options("symbolic-recursive", Base, Options) :- !,
-    % Child plans may select symbolic work themselves; the depth ceiling
-    % below (and prolog-rlm's own budget validation) bounds the recursion.
-    append(Base, [child_capabilities([rlm,
-                                   model(openrouter),
-                                   tool(project_read),
-                                   context(peek),
-                                   context(slice),
-                                   context(search)]),
-               budget(_{max_recursion_depth:2})], Options).
+    mode_options("direct-rlm", Base, Options).
 
 %% Explicit budget updates forwarded from the plugin payload. Absent keys are
 %% skipped; present but non-conforming values are rejected before any
@@ -703,7 +672,7 @@ session_inspect(Frame) :-
     (   sidecar_session(SessionId, Conversation)
     ->  (   sidecar_mode(SessionId, Mode)
         ->  true
-        ;   Mode = "direct"
+        ;   Mode = "symbolic"
         ),
         rlm_conversation:conversation_stats(Conversation, Outcome),
         (   Outcome = ok(Stats)

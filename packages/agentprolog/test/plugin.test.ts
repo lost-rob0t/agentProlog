@@ -97,10 +97,10 @@ describe("agentProlog DSH plugin", () => {
     const ctx = makeFakeContext();
     const { Transport } = fakeTransportFactory();
     const service = await apply(ctx as unknown as never, config(), { Transport });
-    expect(service.router.resolveMode("s1")).toBe("direct");
-    service.router.setMode("s1", "symbolic");
     expect(service.router.resolveMode("s1")).toBe("symbolic");
-    expect(service.router.resolveMode("s2")).toBe("direct");
+    service.router.setMode("s1", "direct");
+    expect(service.router.resolveMode("s1")).toBe("direct");
+    expect(service.router.resolveMode("s2")).toBe("symbolic");
     expect(service.capabilities()).toMatchObject({ modes: true });
   });
 
@@ -140,7 +140,7 @@ describe("agentProlog DSH plugin", () => {
     const { Transport } = fakeTransportFactory();
     const service = await apply(ctx as unknown as never, config(), { Transport });
     expect(ctx.commands).toBeUndefined();
-    expect(service.router.resolveMode("s1")).toBe("direct");
+    expect(service.router.resolveMode("s1")).toBe("symbolic");
   });
 
   it("stops the transport when a Cordis effect disposer runs", async () => {
