@@ -89,13 +89,14 @@ async function main(): Promise<number> {
     }
   }
 
+  const budgetOverrides: Record<string, number> = {};
   const router = new ModeRouter({
     execute: (request, mode) =>
       executeTurnViaBridge(transport.activeBridge!, {
         sessionId: request.sessionId,
         text: request.text,
         mode,
-        options: { provider: "openrouter", ...(model === null ? {} : { model }) },
+        options: { provider: "openrouter", ...(model === null ? {} : { model }), ...budgetOverrides },
       }),
   });
 
@@ -106,6 +107,7 @@ async function main(): Promise<number> {
     input: process.stdin,
     output: process.stdout,
     tty: Boolean(process.stdout.isTTY),
+    budgetOverrides,
   });
   app.banner({
     runtime: String(description.payload.runtime),
