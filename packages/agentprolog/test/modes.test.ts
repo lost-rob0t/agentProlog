@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_MODE, isMode, modeLabel, parseMode, AGENTPROLOG_MODES } from "../src/modes.js";
 
 describe("agentProlog modes", () => {
-  it("exposes exactly the three supported modes", () => {
-    expect([...AGENTPROLOG_MODES]).toEqual(["direct", "symbolic", "symbolic-recursive"]);
+  it("exposes exactly the four supported modes", () => {
+    expect([...AGENTPROLOG_MODES]).toEqual(["direct", "direct-rlm", "symbolic", "symbolic-recursive"]);
   });
 
   it("defaults to direct", () => {
@@ -29,6 +29,7 @@ describe("agentProlog modes", () => {
 
   it("labels modes for command results", () => {
     expect(modeLabel("direct")).toBe("direct");
+    expect(modeLabel("direct-rlm")).toBe("direct-rlm");
     expect(modeLabel("symbolic")).toBe("symbolic");
     expect(modeLabel("symbolic-recursive")).toBe("symbolic-recursive");
   });
