@@ -8,11 +8,49 @@ The TUI accepts per-turn overrides through `/budget`; defaults remain Prolog-RLM
 
 Structured token-budget errors retain `kind`, `used` and `limit`. Explicit AgentProlog skills/tools inventory questions in the TUI resolve to the canonical catalog rather than infer runtime skills from conversation instructions.
 
-## Deferred to upstream runtime
+## Product warm-context integration
 
-- Native direct-loop message projection as a managed conversation strategy.
-- Automatic incremental warm publication using `rlm_conversation_warm` and `rlm_artifact`.
-- Project-scoped KB observation indexing, provenance and replay-safe generation.
-- A CI-validated upstream pin and updated `flake.lock`.
+The AgentProlog sidecar uses the pinned, existing `rlm_artifact` and
+`rlm_conversation_warm` public APIs. By default, for `direct` and
+`direct-rlm` only, it publishes a **maximum of 48** completed
+historical messages after at least **24 eligible unprocessed messages**
+accumulate, keeping the newest 12 messages hot. Set
+`AGENTPROLOG_AUTO_WARM=0` to disable this product-layer producer.
+This is a message-count threshold, not measured token-pressure compaction.
+
+Production derives new immutable warm artifacts and reuses their
+representation-selected context on the managed turn. Old messages stay
+durable and cold-addressable, including when generation fails.
+The model-based generator may incur **an additional completion** with
+its own budget; there is not yet a joint token/cost reservation with
+the enclosing managed turn. Failures are reported as compaction status
+and are not silently treated as successful compaction.
+
+A sidecar companion artifact store is derived from the admitted
+private conversation store path with suffix `.warm.db`.
+The `session.kb` protocol operation and `/kb` command project
+**read-only** typed observation records from warm summaries, scoped
+to the admitted conversation/project root. These are
+`model_claim` observations, not trusted runtime facts or executable
+Prolog clauses. The TUI output is capped at 100 observations; it
+reports truncation. `/status` exposes the last compaction status.
+The canonical runtime skills catalog is independent of those records.
+
+## Remaining work
+
+- Native `rlm_direct/4` message/tool projection as a managed
+  conversation strategy; `direct-rlm` currently uses the canonical
+  `rlm_completion` direct-or-plan supervisor.
+- Upstream PR #519 provides a generic opt-in warm publisher with
+  explicit batch options; adopt a reviewed upstream release/pin
+  instead of maintaining the product wrapper indefinitely.
+- A full semantic Prolog project-KB materialization, typed
+  relational observation indexing and provenance-aware querying,
+  not just the current read-only warm-context observation projection.
+- Durable multi-writer concurrency guarantees, restart crash tests,
+  token-pressure thresholds and live provider verification.
+
+Do not claim all of these follow-ups are done because
+the TypeScript and keyless sidecar checks pass.
 
 Never edit immutable source messages, grant executable authority to extracted claims, or install a chat preference as a trusted skill.
