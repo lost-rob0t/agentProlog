@@ -454,8 +454,6 @@ apply_budget_updates(Options0, Updates, Options) :-
 
 mode_recursion_ceiling("direct", 0).
 mode_recursion_ceiling("direct-rlm", 2).
-mode_recursion_ceiling("symbolic", 1).
-mode_recursion_ceiling("symbolic-recursive", 2).
 
 enforce_mode_recursion(Mode, Options, Options) :-
     (   member(budget(Budget), Options),
