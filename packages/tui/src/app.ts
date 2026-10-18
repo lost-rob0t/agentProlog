@@ -27,6 +27,8 @@ export interface AppOptions {
   readonly input: NodeJS.ReadableStream;
   readonly output: NodeJS.WritableStream;
   readonly tty: boolean;
+  /** Shared with the canonical turn adapter; optional for embedding hosts. */
+  readonly budgetOverrides?: Record<string, number>;
 }
 
 /**
@@ -60,7 +62,7 @@ export class App {
     if (info.skills.length > 0) {
       line(dim(tty, `skills: ${info.skills.join(", ")}`));
     }
-    line(dim(tty, "/direct  /symbolic  /symbolic-recursive  —  /help lists all commands"));
+    line(dim(tty, "/direct  /direct-rlm  /symbolic  /symbolic-recursive  —  /help lists all commands"));
     line("");
   }
 
@@ -165,7 +167,7 @@ export class App {
       case "mode": {
         if (parsed.args) {
           if (!isMode(parsed.args)) {
-            this.printLine(`✗ unknown mode "${parsed.args}" — one of: direct, symbolic, symbolic-recursive`);
+            this.printLine(`✗ unknown mode "${parsed.args}" — one of: direct, direct-rlm, symbolic, symbolic-recursive`);
             return;
           }
           await this.setMode(parseMode(parsed.args));
@@ -179,6 +181,38 @@ export class App {
       case "status": {
         const state = await this.inspectSession();
         this.printLine(`Session: ${state.session_id} · mode: ${state.mode} · ${state.busy ? "running" : "idle"}`);
+        return;
+      }
+      case "budget": {
+        const overrides = this.options.budgetOverrides;
+        if (!overrides) {
+          this.printLine("Budget controls unavailable in this frontend.");
+          return;
+        }
+        if (!parsed.args) {
+          const entries = Object.entries(overrides).map(([key, value]) => key + "=" + value);
+          this.printLine(entries.length ? "Budget overrides: " + entries.join(", ") : "Budget: runtime defaults (8192 total tokens upstream)");
+          return;
+        }
+        if (parsed.args === "reset") {
+          for (const key of Object.keys(overrides)) delete overrides[key];
+          this.printLine("Budget: runtime defaults restored.");
+          return;
+        }
+        const [field, raw, ...extra] = parsed.args.split(/\s+/u);
+        const fields: Record<string, string> = {
+          tokens: "max_total_tokens", "model-calls": "max_model_calls",
+          "tool-calls": "max_tool_calls", iterations: "max_iterations",
+        };
+        const key = field ? fields[field] : undefined;
+        const maximum = field === "tokens" ? 131072 : 128;
+        if (!key || !raw || extra.length > 0 || !/^\d+$/u.test(raw) ||
+            !Number.isSafeInteger(Number(raw)) || Number(raw) < 1 || Number(raw) > maximum) {
+          this.printLine("Usage: /budget tokens <1..131072> | model-calls|tool-calls|iterations <1..128> | reset");
+          return;
+        }
+        overrides[key] = Number(raw);
+        this.printLine("Budget override: " + key + "=" + raw + " (next turn)");
         return;
       }
       case "tools": {
@@ -294,7 +328,9 @@ export class App {
 
   private printError(error: unknown): void {
     const protocol = error as { code?: string; message?: string };
-    const code = typeof protocol?.code === "string" ? protocol.code : "error";
+    const code = typeof (protocol as { runtimeCode?: string })?.runtimeCode === "string"
+      ? (protocol as { runtimeCode: string }).runtimeCode
+      : typeof protocol?.code === "string" ? protocol.code : "error";
     const message = error instanceof Error ? error.message : String(error);
     this.printLine(`✗ [${code}] ${message}`);
   }
