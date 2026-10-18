@@ -103,6 +103,16 @@ test(compaction_spending_survives_execution_failure) :-
     assertion(Status.usage.total_tokens =:= 127),
     assertion(Status.start =:= 1), assertion(Status.end =:= 3).
 
+test(failed_compaction_preserves_known_spending_without_inventing_unknown_usage) :-
+    Warm = auto_warm_status{enabled:true, published:false, reason:failed},
+    agentprolog_dsh_sidecar:compaction_status(error(_{auto_warm:Warm}), Unknown),
+    assertion(Unknown.state == "failed"),
+    assertion(\+ get_dict(usage, Unknown, _)),
+    put_dict(generation, Warm, _{usage:_{total_tokens:91}}, WithUsage),
+    agentprolog_dsh_sidecar:compaction_status(error(_{auto_warm:WithUsage}), Known),
+    assertion(Known.state == "failed"),
+    assertion(Known.usage.total_tokens =:= 91).
+
 test(all_modes_execute_managed_turns_with_visible_project_reads) :-
     forall(member(Mode, ["direct", "direct-rlm", "symbolic", "symbolic-recursive"]),
            managed_mode_turn(Mode)).

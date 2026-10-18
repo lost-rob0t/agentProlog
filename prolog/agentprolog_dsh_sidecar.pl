@@ -370,9 +370,12 @@ compaction_status(error(_), _{state:"turn_failed"}).
 warm_compaction_status(Warm, Status) :-
     ( get_dict(published, Warm, true)
     -> Warm.source_range = range(Start, End),
-       ( get_dict(usage, Warm.generation, Usage) -> true ; Usage = _{} ),
-       Status = _{state:"published", start:Start, end:End, usage:Usage}
-    ; atom_string(Warm.reason, Reason), Status = _{state:Reason}
+       Base = _{state:"published", start:Start, end:End}
+    ; atom_string(Warm.reason, Reason), Base = _{state:Reason}
+    ),
+    ( get_dict(generation, Warm, Generation), get_dict(usage, Generation, Usage)
+    -> put_dict(usage, Base, Usage, Status)
+    ; Status = Base
     ).
 
 %% Warm generation only reads the opaque conversation context. It must not
