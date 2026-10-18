@@ -113,5 +113,6 @@ export class TurnExecutionError extends ProtocolError {
     super(cause.runtimeCode ?? cause.code, cause.message);
     this.name = "TurnExecutionError";
     this.cause = cause;
+    if (cause.runtimeMeta !== undefined) this.runtimeMeta = cause.runtimeMeta;
   }
 }

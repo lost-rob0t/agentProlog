@@ -73,6 +73,10 @@ export class Bridge {
     } else {
       const error = new ProtocolError(`runtime_${frame.status}`, frame.error?.message ?? frame.status);
       if (typeof frame.error?.code === "string") error.runtimeCode = frame.error.code;
+      const meta = frame.payload?.meta;
+      if (typeof meta === "object" && meta !== null && !Array.isArray(meta)) {
+        error.runtimeMeta = meta as Record<string, unknown>;
+      }
       pending.reject(error);
     }
     return frame;

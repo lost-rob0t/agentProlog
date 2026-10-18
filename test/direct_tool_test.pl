@@ -93,6 +93,16 @@ test(skill_options_are_canonical_and_consumed) :-
           assertion(memberchk(skill_catalog(Catalog), Options)) ),
         retractall(agentprolog_dsh_sidecar:sidecar_skill_catalog(_))).
 
+test(compaction_spending_survives_execution_failure) :-
+    Warm = auto_warm_status{enabled:true, published:true,
+                           source_range:range(1,3),
+                           generation:_{usage:_{total_tokens:127}}},
+    agentprolog_dsh_sidecar:compaction_status(
+        error(conversation_error{kind:conversation_error, auto_warm:Warm}), Status),
+    assertion(Status.state == "published"),
+    assertion(Status.usage.total_tokens =:= 127),
+    assertion(Status.start =:= 1), assertion(Status.end =:= 3).
+
 test(all_modes_execute_managed_turns_with_visible_project_reads) :-
     forall(member(Mode, ["direct", "direct-rlm", "symbolic", "symbolic-recursive"]),
            managed_mode_turn(Mode)).

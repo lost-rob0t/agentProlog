@@ -311,7 +311,9 @@ run_turn_guarded(Frame, Conversation, Token, Mode) :-
           Error,
           Outcome = exception(Error)),
     (   sidecar_cancelled(Frame.session_id, Frame.request_id)
-    ->  reply_status(Frame, "cancelled", _{},
+    ->  ( nonvar(Compaction) -> CancelPayload = _{meta:_{compaction:Compaction}}
+        ; CancelPayload = _{} ),
+        reply_status(Frame, "cancelled", CancelPayload,
                      _{code:"cancelled", message:"canonical Prolog-RLM turn cancelled"})
     ;   Outcome = ok(Turn)
     ->  turn_payload(Turn, Model, Mode, Compaction, Payload),
@@ -320,7 +322,8 @@ run_turn_guarded(Frame, Conversation, Token, Mode) :-
     ;   Outcome = error(Error)
     ->  turn_error_details(Error, Code, Details),
         emit_event(Frame.session_id, Frame.request_id, "turn_finished", _{status:"error", mode:Mode, code:Code}),
-        reply_error(Frame, Code, Details)
+        put_dict(code, Details, Code, StructuredError),
+        reply_status(Frame, "error", _{meta:_{compaction:Compaction}}, StructuredError)
     ;   Outcome = exception(Error)
     ->  safe_term_string(Error, Text),
         emit_event(Frame.session_id, Frame.request_id, "turn_finished", _{status:"error", mode:Mode, code:"runtime_exception"}),
@@ -358,14 +361,19 @@ auto_warm_options(Active, [min_batch_messages(1), max_batch_messages(48),
     compaction_completion_options(Active, Safe).
 
 compaction_status(ok(Turn), Status) :- !,
-    Warm = Turn.context.auto_warm,
+    warm_compaction_status(Turn.context.auto_warm, Status).
+compaction_status(error(Error), Status) :-
+    is_dict(Error), get_dict(auto_warm, Error, Warm), !,
+    warm_compaction_status(Warm, Status).
+compaction_status(error(_), _{state:"turn_failed"}).
+
+warm_compaction_status(Warm, Status) :-
     ( get_dict(published, Warm, true)
     -> Warm.source_range = range(Start, End),
        ( get_dict(usage, Warm.generation, Usage) -> true ; Usage = _{} ),
        Status = _{state:"published", start:Start, end:End, usage:Usage}
     ; atom_string(Warm.reason, Reason), Status = _{state:Reason}
     ).
-compaction_status(error(_), _{state:"turn_failed"}).
 
 %% Warm generation only reads the opaque conversation context. It must not
 %% inherit the active coding-agent tool registry, skills, child recursion, or

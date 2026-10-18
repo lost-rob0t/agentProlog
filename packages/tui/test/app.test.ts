@@ -228,9 +228,11 @@ describe("TUI app", () => {
     respondLast({
       status: "error",
       error: { code: "budget_exhausted", message: "iteration ceiling reached" },
+      payload: { meta: { compaction: { state: "published", usage: { total_tokens: 127 } } } },
     });
     await pending;
     expect(output.text).toContain("✗ [budget_exhausted] iteration ceiling reached");
+    expect(output.text).toContain("Compaction: published · 127 compaction tokens");
     await app.handleLine("/quit");
     await quit;
   });

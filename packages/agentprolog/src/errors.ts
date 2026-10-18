@@ -2,6 +2,8 @@ export class ProtocolError extends Error {
   readonly code: string;
   /** Structured code reported by the Prolog runtime, when the failure crossed the bridge. */
   runtimeCode?: string;
+  /** Runtime accounting metadata, preserved even when execution fails. */
+  runtimeMeta?: Record<string, unknown>;
 
   constructor(code: string, message: string) {
     super(message);

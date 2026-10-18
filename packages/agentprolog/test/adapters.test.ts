@@ -112,8 +112,10 @@ describe("mode adapters", () => {
   it("wraps runtime errors in a structured TurnExecutionError", async () => {
     const harness = makeHarness();
     const pending = executeTurnViaBridge(harness.bridge, { sessionId: "s1", text: "hi", mode: "symbolic", options: {} });
-    harness.respond({ status: "error", error: { code: "budget_exhausted", message: "iteration ceiling reached" } });
-    await expect(pending).rejects.toMatchObject({ code: "budget_exhausted", name: "TurnExecutionError" });
+    harness.respond({ status: "error", error: { code: "budget_exhausted", message: "iteration ceiling reached" },
+      payload: { meta: { compaction: { state: "published", usage: { total_tokens: 127 } } } } });
+    await expect(pending).rejects.toMatchObject({ code: "budget_exhausted", name: "TurnExecutionError",
+      runtimeMeta: { compaction: { state: "published", usage: { total_tokens: 127 } } } });
   });
 
   it("fails closed when the runtime returns no assistant text", async () => {

@@ -359,6 +359,15 @@ export class App {
     const code = typeof protocol?.code === "string" ? protocol.code : "error";
     const message = error instanceof Error ? error.message : String(error);
     this.printLine(`✗ [${code}] ${message}`);
+    if (error instanceof ProtocolError) {
+      const compaction = error.runtimeMeta?.compaction;
+      if (typeof compaction === "object" && compaction !== null && "state" in compaction) {
+        const usage = "usage" in compaction ? compaction.usage : undefined;
+        const tokens = typeof usage === "object" && usage !== null && "total_tokens" in usage
+          ? " · " + String(usage.total_tokens) + " compaction tokens" : "";
+        this.printLine("Compaction: " + String(compaction.state) + tokens);
+      }
+    }
   }
 
   private printLine(text: string): void {
