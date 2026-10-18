@@ -119,6 +119,7 @@ describe("PrologAgentFactory (mode-aware, headless)", () => {
   it("a direct turn maps one DSH user message to one canonical trajectory", async () => {
     const harness = makeHarness();
     const { agent } = await harness.factory.createAgent(harness.ctx as never, { sessionId: "s1" });
+    harness.router.setMode("s1", "direct");
     agent.followup(userMessage("hello directly"));
 
     const turnRequest = harness.sent.find(frame => frame.operation === "session.turn")!;
@@ -191,11 +192,11 @@ describe("PrologAgentFactory (mode-aware, headless)", () => {
     const first = (await harness.factory.createAgent(harness.ctx as never, { sessionId: "s1" })).agent;
     const second = (await harness.factory.createAgent(harness.ctx as never, { sessionId: "s2" })).agent;
 
-    expect(harness.router.resolveMode("s1")).toBe("direct");
-    expect(harness.router.resolveMode("s2")).toBe("direct");
+    expect(harness.router.resolveMode("s1")).toBe("symbolic");
+    expect(harness.router.resolveMode("s2")).toBe("symbolic");
 
-    harness.router.setMode("s1", "symbolic");
-    expect(harness.router.resolveMode("s2")).toBe("direct");
+    harness.router.setMode("s1", "direct");
+    expect(harness.router.resolveMode("s2")).toBe("symbolic");
 
     first.followup(userMessage("a"));
     harness.respondLast({ text: "ra" });
@@ -207,10 +208,10 @@ describe("PrologAgentFactory (mode-aware, headless)", () => {
     const modes = harness.sent
       .filter(frame => frame.operation === "session.turn")
       .map(frame => frame.payload.mode);
-    expect(modes).toEqual(["symbolic", "direct"]);
+    expect(modes).toEqual(["direct", "symbolic"]);
 
     await first.dispose();
-    expect(harness.router.resolveMode("s1")).toBe("direct");
-    expect(harness.router.resolveMode("s2")).toBe("direct");
+    expect(harness.router.resolveMode("s1")).toBe("symbolic");
+    expect(harness.router.resolveMode("s2")).toBe("symbolic");
   });
 });

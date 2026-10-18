@@ -36,6 +36,7 @@ export function modeLabelFor(mode: AgentPrologMode): string {
 export function helpText(): string {
   return [
     "/direct               switch to direct mode (no symbolic planning, no recursion)",
+    "/direct-rlm           switch to bounded RLM-capable direct mode",
     "/symbolic             switch to symbolic mode (typed plans, single recursion level)",
     "/symbolic-recursive   switch to symbolic-recursive mode (bounded recursive decomposition)",
     "/mode [name]          show the current mode, or set it",
@@ -44,7 +45,19 @@ export function helpText(): string {
     "/skill reset          reset to the runtime's core skills",
     "/tools                list tools registered for this session",
     "/status               inspect canonical session state",
+    "/kb                   inspect model-derived project KB observations",
+    "/budget               show per-turn budget overrides",
+    "/budget <field> <n>   set tokens, model-calls, tool-calls, or iterations",
+    "/budget reset         restore runtime budget defaults",
     "/clear                clear the transcript",
     "/quit                 exit (Ctrl+D; Ctrl+C cancels a running turn first)",
   ].join("\n");
+}
+
+/** Resolve only explicit runtime-inventory questions locally against the canonical catalog. */
+export function inventoryCommand(text: string): "skills" | "tools" | undefined {
+  const normalized = text.trim().toLowerCase().replace(/[?.!]+$/u, "").trim();
+  if (/^(?:what|which) (?:skills?|skilsl) (?:do you have|does agentprolog have|are (?:loaded|installed|available))$/u.test(normalized)) return "skills";
+  if (/^(?:what|which) tools? (?:do you have|does agentprolog have|are (?:loaded|installed|available))$/u.test(normalized)) return "tools";
+  return undefined;
 }

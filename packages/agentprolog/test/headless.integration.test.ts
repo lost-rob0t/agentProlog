@@ -14,6 +14,8 @@ describe.skipIf(!SIDECAR)("headless sidecar integration (real Prolog process, ke
     expect(description.payload.runtime).toBe("prolog-rlm");
     expect(description.payload.protocol_version).toBe(1);
     expect(description.payload.capabilities).toMatchObject({ modes: true, cancellation: true });
+    expect(description.payload.modes).toContain("direct-rlm");
+    expect(description.payload.capabilities).toMatchObject({ context_kb: true });
     await transport.stop("test end");
   }, 30000);
 
@@ -29,7 +31,7 @@ describe.skipIf(!SIDECAR)("headless sidecar integration (real Prolog process, ke
         version: 1, request_id: "resume-create", session_id: sessionId, operation: "session.start",
         payload: { cwd: process.cwd() },
       });
-      expect(created.payload).toMatchObject({ started: true, resumed: false, mode: "direct" });
+      expect(created.payload).toMatchObject({ started: true, resumed: false, mode: "symbolic" });
       await expect(first.request({
         version: 1, request_id: "live-wrong-root", session_id: sessionId, operation: "session.start",
         payload: { cwd: sandbox },
@@ -50,15 +52,29 @@ describe.skipIf(!SIDECAR)("headless sidecar integration (real Prolog process, ke
         version: 1, request_id: "resume-open", session_id: sessionId, operation: "session.start",
         payload: { cwd: process.cwd() },
       });
-      expect(resumed.payload).toMatchObject({ started: true, resumed: true, mode: "direct" });
+      expect(resumed.payload).toMatchObject({ started: true, resumed: true, mode: "symbolic" });
       const inspected = await second.request({
         version: 1, request_id: "resume-inspect", session_id: sessionId, operation: "session.inspect", payload: {},
       });
-      expect(inspected.payload).toMatchObject({ session_id: sessionId, busy: false, mode: "direct" });
+      expect(inspected.payload).toMatchObject({ session_id: sessionId, busy: false, mode: "symbolic" });
     } finally {
       await first.stop("test cleanup");
       await second.stop("test cleanup");
       rmSync(sandbox, { recursive: true, force: true });
+    }
+  }, 30000);
+
+  it("exposes an empty read-only project KB in a fresh session", async () => {
+    const transport = new SidecarTransport({ command: SIDECAR! });
+    try {
+      await transport.start();
+      await transport.request({ version: 1, request_id: "kb-start", session_id: "kb-new",
+        operation: "session.start", payload: { cwd: process.cwd() } });
+      const kb = await transport.request({ version: 1, request_id: "kb-read", session_id: "kb-new",
+        operation: "session.kb", payload: {} });
+      expect(kb.payload).toMatchObject({ observations: [], count: 0, truncated: false });
+    } finally {
+      await transport.stop("kb test cleanup");
     }
   }, 30000);
 
@@ -80,12 +96,12 @@ describe.skipIf(!SIDECAR)("headless sidecar integration (real Prolog process, ke
     const started = (await transport.request({ version: 1, request_id: "s1", session_id: "sess-1", operation: "session.start", payload: {} })) as {
       payload: { mode: string };
     };
-    expect(started.payload.mode).toBe("direct");
+    expect(started.payload.mode).toBe("symbolic");
 
     const setSymbolic = (await transport.request({
       version: 1, request_id: "s2", session_id: "sess-1", operation: "session.mode", payload: { mode: "symbolic" },
     })) as { payload: { mode: string; previous: string } };
-    expect(setSymbolic.payload).toMatchObject({ mode: "symbolic", previous: "direct" });
+    expect(setSymbolic.payload).toMatchObject({ mode: "symbolic", previous: "symbolic" });
 
     const setRecursive = (await transport.request({
       version: 1, request_id: "s3", session_id: "sess-1", operation: "session.mode", payload: { mode: "symbolic-recursive" },

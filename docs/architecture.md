@@ -10,7 +10,7 @@ DSH runtime (dsh-base profile)             agentProlog TUI (packages/tui, pnpm r
    +-- agentProlog plugin (packages/agentprolog)
    |       |
    |       +-- ModeRouter          one authoritative backend decision per turn
-   |       +-- mode commands       /direct  /symbolic  /symbolic-recursive
+   |       +-- mode commands       /direct  /direct-rlm  /symbolic  /symbolic-recursive
    |       +-- adapters            mode -> canonical sidecar request shaping
    |       +-- skills              skill roots -> confined runtime catalog
    |       +-- PrologAgentFactory  the single DSH AgentFactory
@@ -28,7 +28,7 @@ The TUI and the DSH plugin are two frontends over one canonical runtime: both dr
 
 | Module | Responsibility |
 | --- | --- |
-| `src/modes.ts` | The closed mode set (`direct`, `symbolic`, `symbolic-recursive`) and validation. |
+| `src/modes.ts` | The closed mode set (`direct`, `direct-rlm`, `symbolic`, `symbolic-recursive`) and validation. |
 | `src/router.ts` | Session-scoped mode state and the single `executeTurn` dispatch point. |
 | `src/commands.ts` | The three slash commands as DSH `CommandDefinition`s; handlers perform router transitions and return `Mode: <mode>` results. |
 | `src/adapters.ts` | Typed boundary to the sidecar: canonical turn payloads per mode, structured failure classification, recursion-ceiling forwarding. |
@@ -47,7 +47,8 @@ user turn (DSH)
    -> ModeRouter.executeTurn            (mode resolved from session state)
    -> adapter shapes session.turn       (mode + text + explicit ceilings)
    -> sidecar dispatches by mode:
-        direct                -> capabilities without rlm, recursion depth 0
+        direct                -> native managed loop, no rlm, recursion depth 0
+        direct-rlm            -> native managed loop with recursion depth 2
         symbolic              -> runtime default direct-or-plan supervisor
         symbolic-recursive    -> child symbolic capabilities + explicit depth budget
    -> rlm_conversation_runtime:conversation_turn (canonical trajectory)

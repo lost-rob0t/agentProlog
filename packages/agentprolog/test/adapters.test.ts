@@ -56,6 +56,29 @@ describe("mode adapters", () => {
     expect(outcome).toMatchObject({ text: "done", mode: "symbolic-recursive", provider: "openrouter", model: "deepseek-v4" });
   });
 
+  it("forwards bounded budget overrides for direct-rlm", async () => {
+    const harness = makeHarness();
+    const pending = executeTurnViaBridge(harness.bridge, {
+      sessionId: "s1", text: "inspect", mode: "direct-rlm",
+      options: { max_total_tokens: 20480, max_model_calls: 8, maxRecursionDepth: 2 },
+    });
+    harness.respond({ payload: { text: "done" } });
+    await expect(pending).resolves.toMatchObject({ mode: "direct-rlm" });
+    expect(harness.sent[0]?.payload).toMatchObject({
+      mode: "direct-rlm", max_total_tokens: 20480,
+      max_model_calls: 8, max_recursion_depth: 2,
+    });
+  });
+
+  it("rejects malformed budget overrides without side effects", async () => {
+    const harness = makeHarness();
+    await expect(executeTurnViaBridge(harness.bridge, {
+      sessionId: "s1", text: "inspect", mode: "direct",
+      options: { max_total_tokens: 0 },
+    })).rejects.toMatchObject({ code: "invalid_budget_field" });
+    expect(harness.sent).toHaveLength(0);
+  });
+
   it("omits recursion fields for direct and symbolic modes", async () => {
     for (const mode of ["direct", "symbolic"] as const) {
       const harness = makeHarness();
@@ -89,8 +112,10 @@ describe("mode adapters", () => {
   it("wraps runtime errors in a structured TurnExecutionError", async () => {
     const harness = makeHarness();
     const pending = executeTurnViaBridge(harness.bridge, { sessionId: "s1", text: "hi", mode: "symbolic", options: {} });
-    harness.respond({ status: "error", error: { code: "budget_exhausted", message: "iteration ceiling reached" } });
-    await expect(pending).rejects.toMatchObject({ code: "budget_exhausted", name: "TurnExecutionError" });
+    harness.respond({ status: "error", error: { code: "budget_exhausted", message: "iteration ceiling reached" },
+      payload: { meta: { compaction: { state: "published", usage: { total_tokens: 127 } } } } });
+    await expect(pending).rejects.toMatchObject({ code: "budget_exhausted", name: "TurnExecutionError",
+      runtimeMeta: { compaction: { state: "published", usage: { total_tokens: 127 } } } });
   });
 
   it("fails closed when the runtime returns no assistant text", async () => {

@@ -9,7 +9,7 @@ export interface ModeCommandDeps {
 }
 
 /**
- * The three canonical mode commands. Each handler performs a real, observable
+ * The canonical mode commands. Each handler performs a real, observable
  * router state transition — no prompt text asks any model to "interpret" a
  * command. The dispatching UI (web, TUI, headless) renders the returned
  * result text, keeping agentProlog presentation-free.
@@ -37,6 +37,7 @@ function commandNameFor(mode: AgentPrologMode): string {
 
 const DESCRIPTIONS: Record<AgentPrologMode, string> = {
   direct: "Switch this session to direct mode: native model/tool execution without symbolic planning or recursion.",
+  "direct-rlm": "Switch to bounded RLM-capable direct conversation with child model/context operations.",
   symbolic: "Switch this session to symbolic mode: Prolog-RLM typed-plan supervision over the configured model.",
   "symbolic-recursive": "Switch this session to symbolic-recursive mode: bounded recursive Prolog-RLM decomposition with explicit iteration caps.",
 };

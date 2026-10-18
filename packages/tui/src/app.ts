@@ -10,8 +10,9 @@ import {
   ProtocolError,
   type Bridge,
   type RequestFrame,
+  type AgentPrologMode,
 } from "@agentprolog/dsh";
-import { helpText, parseInput, resolveModeCommand } from "./commands.js";
+import { helpText, parseInput, resolveModeCommand, inventoryCommand } from "./commands.js";
 import { dim, Spinner } from "./render.js";
 
 export interface AppTransport {
@@ -27,6 +28,8 @@ export interface AppOptions {
   readonly input: NodeJS.ReadableStream;
   readonly output: NodeJS.WritableStream;
   readonly tty: boolean;
+  /** Shared with the canonical turn adapter; optional for embedding hosts. */
+  readonly budgetOverridesFor?: (mode: AgentPrologMode) => Record<string, number>;
 }
 
 /**
@@ -60,7 +63,7 @@ export class App {
     if (info.skills.length > 0) {
       line(dim(tty, `skills: ${info.skills.join(", ")}`));
     }
-    line(dim(tty, "/direct  /symbolic  /symbolic-recursive  —  /help lists all commands"));
+    line(dim(tty, "/direct  /direct-rlm  /symbolic  /symbolic-recursive  —  /help lists all commands"));
     line("");
   }
 
@@ -111,7 +114,9 @@ export class App {
       if (parsed.kind === "command") {
         await this.handleCommand(parsed);
       } else {
-        await this.submitTurn(parsed.text);
+        const inventory = inventoryCommand(parsed.text);
+        if (inventory) await this.handleCommand({ name: inventory, args: "" });
+        else await this.submitTurn(parsed.text);
       }
     } catch (error) {
       // Stopping intentionally rejects in-flight requests (bridge disposal);
@@ -165,7 +170,7 @@ export class App {
       case "mode": {
         if (parsed.args) {
           if (!isMode(parsed.args)) {
-            this.printLine(`✗ unknown mode "${parsed.args}" — one of: direct, symbolic, symbolic-recursive`);
+            this.printLine(`✗ unknown mode "${parsed.args}" — one of: direct, direct-rlm, symbolic, symbolic-recursive`);
             return;
           }
           await this.setMode(parseMode(parsed.args));
@@ -179,6 +184,55 @@ export class App {
       case "status": {
         const state = await this.inspectSession();
         this.printLine(`Session: ${state.session_id} · mode: ${state.mode} · ${state.busy ? "running" : "idle"}`);
+        if (typeof state.compaction === "object" && state.compaction !== null && "state" in state.compaction) {
+          this.printLine("Compaction: " + String(state.compaction.state));
+        }
+        return;
+      }
+      case "budget": {
+        const mode = this.options.router.resolveMode(this.options.sessionId);
+        const overrides = this.options.budgetOverridesFor?.(mode);
+        if (!overrides) {
+          this.printLine("Budget controls unavailable in this frontend.");
+          return;
+        }
+        if (!parsed.args) {
+          const entries = Object.entries(overrides).map(([key, value]) => key + "=" + value);
+          this.printLine(entries.length ? "Budget overrides (" + mode + "): " + entries.join(", ") : "Budget (" + mode + "): runtime defaults (8192 total tokens upstream)");
+          return;
+        }
+        if (parsed.args === "reset") {
+          for (const key of Object.keys(overrides)) delete overrides[key];
+          this.printLine("Budget (" + mode + "): runtime defaults restored.");
+          return;
+        }
+        const [field, raw, ...extra] = parsed.args.split(/\s+/u);
+        const fields: Record<string, string> = {
+          tokens: "max_total_tokens", "model-calls": "max_model_calls",
+          "tool-calls": "max_tool_calls", iterations: "max_iterations",
+        };
+        const key = field ? fields[field] : undefined;
+        const maximum = field === "tokens" ? 131072 : 128;
+        if (!key || !raw || extra.length > 0 || !/^\d+$/u.test(raw) ||
+            !Number.isSafeInteger(Number(raw)) || Number(raw) < 1 || Number(raw) > maximum) {
+          this.printLine("Usage: /budget tokens <1..131072> | model-calls|tool-calls|iterations <1..128> | reset");
+          return;
+        }
+        overrides[key] = Number(raw);
+        this.printLine("Budget override (" + mode + "): " + key + "=" + raw + " (next turn in this mode)");
+        return;
+      }
+      case "kb": {
+        const result = await this.request("session.kb");
+        const rows = Array.isArray(result.observations) ? result.observations : [];
+        this.printLine("Project KB: " + String(result.count ?? rows.length) + " model-derived observations");
+        for (const row of rows) {
+          if (typeof row === "object" && row !== null &&
+              typeof row.kind === "string" && typeof row.text === "string") {
+            this.printLine("• " + row.kind + " — " + row.text);
+          }
+        }
+        if (result.truncated === true) this.printLine("… truncated to 100 observations");
         return;
       }
       case "tools": {
@@ -248,7 +302,7 @@ export class App {
     return (response.payload ?? {}) as Record<string, unknown>;
   }
 
-  private async inspectSession(): Promise<{ session_id: string; mode: string; busy: boolean }> {
+  private async inspectSession(): Promise<{ session_id: string; mode: string; busy: boolean; compaction?: { state: string } }> {
     const state = await this.request("session.inspect");
     if (
       state.session_id !== this.options.sessionId ||
@@ -257,7 +311,10 @@ export class App {
     ) {
       throw new ProtocolError("invalid_session_state", "sidecar returned incomplete or mismatched session inspection");
     }
-    return { session_id: state.session_id, mode: state.mode, busy: state.busy };
+    return { session_id: state.session_id, mode: state.mode, busy: state.busy,
+      ...(typeof state.compaction === "object" && state.compaction !== null &&
+          typeof (state.compaction as Record<string, unknown>).state === "string"
+        ? { compaction: state.compaction as { state: string } } : {}) };
   }
 
   private async setMode(mode: ReturnType<typeof parseMode>): Promise<void> {
@@ -284,6 +341,11 @@ export class App {
       spinner.stop();
       this.printLine(`⏺ ${outcome.text}`);
       this.printLine(dim(this.options.tty, `  ${outcome.provider}/${outcome.model ?? "default"} · mode: ${outcome.mode}`));
+      const compaction = outcome.meta?.compaction;
+      if (typeof compaction === "object" && compaction !== null && "state" in compaction &&
+          (compaction.state === "published" || compaction.state === "failed")) {
+        this.printLine("Compaction: " + String(compaction.state));
+      }
     } catch (error) {
       spinner.stop();
       this.printError(error);
@@ -297,6 +359,15 @@ export class App {
     const code = typeof protocol?.code === "string" ? protocol.code : "error";
     const message = error instanceof Error ? error.message : String(error);
     this.printLine(`✗ [${code}] ${message}`);
+    if (error instanceof ProtocolError) {
+      const compaction = error.runtimeMeta?.compaction;
+      if (typeof compaction === "object" && compaction !== null && "state" in compaction) {
+        const usage = "usage" in compaction ? compaction.usage : undefined;
+        const tokens = typeof usage === "object" && usage !== null && "total_tokens" in usage
+          ? " · " + String(usage.total_tokens) + " compaction tokens" : "";
+        this.printLine("Compaction: " + String(compaction.state) + tokens);
+      }
+    }
   }
 
   private printLine(text: string): void {

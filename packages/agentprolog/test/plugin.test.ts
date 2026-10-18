@@ -76,7 +76,7 @@ function fakeTransportFactory() {
 }
 
 describe("agentProlog DSH plugin", () => {
-  it("mounts exactly one factory, the service, and the three commands", async () => {
+  it("mounts exactly one factory, the service, and the four commands", async () => {
     const ctx = makeFakeContext();
     const { Transport, instances } = fakeTransportFactory();
     const service = await apply(ctx as unknown as never, config(), { Transport });
@@ -85,6 +85,7 @@ describe("agentProlog DSH plugin", () => {
     expect(ctx.services.get("agentprolog")).toBe(service);
     expect(ctx.commands?.registered.map(command => command.name)).toEqual([
       "direct",
+      "direct-rlm",
       "symbolic",
       "symbolic-recursive",
     ]);
@@ -96,10 +97,10 @@ describe("agentProlog DSH plugin", () => {
     const ctx = makeFakeContext();
     const { Transport } = fakeTransportFactory();
     const service = await apply(ctx as unknown as never, config(), { Transport });
-    expect(service.router.resolveMode("s1")).toBe("direct");
-    service.router.setMode("s1", "symbolic");
     expect(service.router.resolveMode("s1")).toBe("symbolic");
-    expect(service.router.resolveMode("s2")).toBe("direct");
+    service.router.setMode("s1", "direct");
+    expect(service.router.resolveMode("s1")).toBe("direct");
+    expect(service.router.resolveMode("s2")).toBe("symbolic");
     expect(service.capabilities()).toMatchObject({ modes: true });
   });
 
@@ -139,7 +140,7 @@ describe("agentProlog DSH plugin", () => {
     const { Transport } = fakeTransportFactory();
     const service = await apply(ctx as unknown as never, config(), { Transport });
     expect(ctx.commands).toBeUndefined();
-    expect(service.router.resolveMode("s1")).toBe("direct");
+    expect(service.router.resolveMode("s1")).toBe("symbolic");
   });
 
   it("stops the transport when a Cordis effect disposer runs", async () => {

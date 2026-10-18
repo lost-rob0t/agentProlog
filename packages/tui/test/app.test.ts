@@ -2,7 +2,7 @@ import { PassThrough, Writable } from "node:stream";
 
 import { describe, expect, it } from "vitest";
 
-import { Bridge, executeTurnViaBridge, ModeRouter, PROTOCOL_VERSION, type RequestFrame } from "@agentprolog/dsh";
+import { Bridge, executeTurnViaBridge, ModeRouter, PROTOCOL_VERSION, type RequestFrame, type AgentPrologMode } from "@agentprolog/dsh";
 import { App } from "../src/app.js";
 
 interface Harness {
@@ -19,6 +19,8 @@ interface Harness {
 function makeHarness(): Harness {
   const sent: RequestFrame[] = [];
   const stopped: string[] = [];
+  const budgetsByMode: Partial<Record<AgentPrologMode, Record<string, number>>> = {};
+  const budgetOverridesFor = (mode: AgentPrologMode): Record<string, number> => (budgetsByMode[mode] ??= {});
   const outputBuffer = { text: "" };
   let deferInspection = false;
 
@@ -29,6 +31,8 @@ function makeHarness(): Harness {
         ? { mode: request.payload.mode }
         : request?.operation === "session.inspect"
           ? { session_id: request.session_id, mode: "direct", busy: false }
+        : request?.operation === "session.kb"
+          ? { observations: [{ kind: "facts", text: "a project observation" }], count: 1, truncated: false }
         : request?.operation === "tool.list"
           ? { tools: [{ name: "project_read", description: "Read a project file" }] }
       : overrides.skills !== undefined
@@ -51,7 +55,7 @@ function makeHarness(): Harness {
       sent.push(frame);
       // Lifecycle operations settle immediately, mirroring the sidecar; turns
       // and skill listings are test-driven through respondTo/respondLast.
-      if (["session.start", "session.cancel", "session.mode", "session.inspect", "tool.list", "skill.reset"].includes(frame.operation) &&
+      if (["session.start", "session.cancel", "session.mode", "session.inspect", "session.kb", "tool.list", "skill.reset"].includes(frame.operation) &&
           !(frame.operation === "session.inspect" && deferInspection)) {
         queueMicrotask(() => respondTo(frame.request_id, { text: "unused" }));
       }
@@ -70,13 +74,14 @@ function makeHarness(): Harness {
   };
 
   const router = new ModeRouter({
+    defaultMode: "direct",
     execute: (request, mode) =>
       // Exercise the real adapter so error classification matches production.
       executeTurnViaBridge(bridge, {
         sessionId: request.sessionId,
         text: request.text,
         mode,
-        options: {},
+        options: { ...budgetOverridesFor(mode) },
       }),
   });
 
@@ -99,6 +104,7 @@ function makeHarness(): Harness {
     input: new PassThrough(),
     output,
     tty: false,
+    budgetOverridesFor,
   });
   app.run(() => quitResolve());
 
@@ -118,11 +124,40 @@ describe("TUI app", () => {
     expect(output.text).toContain("◈ Mode: symbolic");
     expect(app["options"].router.resolveMode("s1")).toBe("symbolic");
 
+    await app.handleLine("/direct-rlm");
+    expect(output.text).toContain("◈ Mode: direct-rlm");
     await app.handleLine("/direct");
     expect(output.text).toContain("◈ Mode: direct");
 
     await app.handleLine("/symbolic-recursive");
     expect(output.text).toContain("◈ Mode: symbolic-recursive");
+    await app.handleLine("/quit");
+    await quit;
+  });
+
+  it("budget overrides forward through the canonical turn adapter", async () => {
+    const { app, output, sent, respondLast, quit } = makeHarness();
+    await app.handleLine("/budget tokens 20480");
+    await app.handleLine("/budget model-calls 8");
+    await app.handleLine("/budget tokens -1");
+    await app.handleLine("/budget");
+    expect(output.text).toContain("max_total_tokens=20480");
+    expect(output.text).toContain("max_model_calls=8");
+    expect(output.text).toContain("Usage: /budget");
+    await app.handleLine("/direct-rlm");
+    await app.handleLine("/budget");
+    expect(output.text).toContain("Budget (direct-rlm): runtime defaults");
+    await app.handleLine("/direct");
+    const pending = app.handleLine("short request");
+    await until(() => sent.some(frame => frame.operation === "session.turn"));
+    expect(sent.find(frame => frame.operation === "session.turn")!.payload).toMatchObject({
+      max_total_tokens: 20480, max_model_calls: 8,
+    });
+    respondLast({ text: "answer" });
+    await pending;
+    await app.handleLine("/budget reset");
+    await app.handleLine("/budget");
+    expect(output.text).toContain("Budget (direct): runtime defaults");
     await app.handleLine("/quit");
     await quit;
   });
@@ -193,9 +228,11 @@ describe("TUI app", () => {
     respondLast({
       status: "error",
       error: { code: "budget_exhausted", message: "iteration ceiling reached" },
+      payload: { meta: { compaction: { state: "published", usage: { total_tokens: 127 } } } },
     });
     await pending;
     expect(output.text).toContain("✗ [budget_exhausted] iteration ceiling reached");
+    expect(output.text).toContain("Compaction: published · 127 compaction tokens");
     await app.handleLine("/quit");
     await quit;
   });
@@ -221,6 +258,30 @@ describe("TUI app", () => {
     });
     await pending;
     expect(output.text).toContain("• demo-skill — a demo");
+    await app.handleLine("/quit");
+    await quit;
+  });
+
+  it("a natural-language AgentProlog skill question uses the runtime catalog, not chat instructions", async () => {
+    const { app, output, sent, respondTo, quit } = makeHarness();
+    await app.handleLine("/symbolic");
+    const pending = app.handleLine("what skilsl do you have");
+    await until(() => sent.some(frame => frame.operation === "skill.list"));
+    const request = sent.find(frame => frame.operation === "skill.list")!;
+    respondTo(request.request_id, { skills: [{ name: "rlm-operate", description: "Core Prolog-RLM skill" }] });
+    await pending;
+    expect(output.text).toContain("• rlm-operate");
+    expect(sent.filter(frame => frame.operation === "session.turn")).toHaveLength(0);
+    await app.handleLine("/quit");
+    await quit;
+  });
+
+  it("reads the bounded project KB from the canonical sidecar", async () => {
+    const { app, output, sent, quit } = makeHarness();
+    await app.handleLine("/kb");
+    expect(sent.map(frame => frame.operation)).toContain("session.kb");
+    expect(output.text).toContain("Project KB: 1 model-derived observations");
+    expect(output.text).toContain("facts — a project observation");
     await app.handleLine("/quit");
     await quit;
   });

@@ -21,7 +21,10 @@ cancellation, and malformed frames fail closed; nothing silently restarts.
 
 :- use_module(library(http/json)).
 :- use_module(library(readutil)).
+:- use_module(library(lists)).
 :- use_module(library(rlm_chain), []).
+:- use_module(library(rlm_artifact), []).
+:- use_module(library(rlm_conversation_warm), []).
 :- use_module(library(rlm_completion), []).
 :- use_module(library(rlm_conversation), []).
 :- use_module(library(rlm_conversation_runtime), []).
@@ -29,6 +32,8 @@ cancellation, and malformed frames fail closed; nothing silently restarts.
 :- use_module(library(rlm_tool), []).
 
 :- dynamic sidecar_store/1.
+:- dynamic sidecar_warm_store/1.
+:- dynamic sidecar_compaction_status/2.
 :- dynamic sidecar_store_lock/1.
 :- dynamic sidecar_session/2.
 :- dynamic sidecar_mode/2.
@@ -43,6 +48,7 @@ cancellation, and malformed frames fail closed; nothing silently restarts.
 protocol_version(1).
 
 valid_mode("direct").
+valid_mode("direct-rlm").
 valid_mode("symbolic").
 valid_mode("symbolic-recursive").
 
@@ -58,6 +64,10 @@ open_runtime_ :-
     rlm_conversation:conversation_store_open(StoreSpec, Outcome),
     require_ok(store_open, Outcome, Store),
     assertz(sidecar_store(Store)),
+    warm_store_spec(WarmSpec),
+    rlm_artifact:artifact_store_open(WarmSpec, ArtifactOutcome),
+    require_ok(warm_store_open, ArtifactOutcome, WarmStore),
+    assertz(sidecar_warm_store(WarmStore)),
     % The catalog starts from the runtime default (prolog-rlm's core
     % operating skills when shipped with the pack); loaded project roots
     % merge on top instead of replacing the core skills.
@@ -71,6 +81,12 @@ conversation_store_spec(persist(File)) :-
     !.
 conversation_store_spec(memory).
 
+warm_store_spec(persist(WarmFile)) :-
+    getenv('AGENTPROLOG_CONVERSATION_STORE', File),
+    File \== "", !,
+    ( string(File) -> FileText = File ; atom_string(File, FileText) ),
+    string_concat(FileText, ".warm.db", WarmFile).
+warm_store_spec(memory).
 % SWI persistency serializes individual journal writes, not the read/sequence/
 % append transaction across processes. Hold a separate advisory lock for the
 % sidecar lifetime, before attaching the journal. Never unlink the lock file:
@@ -87,11 +103,16 @@ acquire_conversation_store_lock(persist(File)) :-
 
 close_runtime :-
     cancel_all_turns,
+    (   retract(sidecar_warm_store(WarmStore))
+    ->  rlm_artifact:artifact_store_close(WarmStore, _)
+    ;   true
+    ),
     (   retract(sidecar_store(Store))
     ->  rlm_conversation:conversation_store_close(Store, _)
     ;   true
     ),
     retractall(sidecar_session(_, _)),
+    retractall(sidecar_compaction_status(_, _)),
     retractall(sidecar_mode(_, _)),
     retractall(sidecar_turn(_, _, _)),
     retractall(sidecar_cancelled(_, _)),
@@ -133,14 +154,15 @@ dispatch_operation("runtime.describe", Frame) :- !,
                runtime:"prolog-rlm",
                transport:"ndjson-stdio",
                canonical_turn:"rlm_conversation_runtime:conversation_turn/4",
-               modes:["direct", "symbolic", "symbolic-recursive"],
+               modes:["direct", "direct-rlm", "symbolic", "symbolic-recursive"],
                capabilities:_{conversation:true,
                               cancellation:true,
                               agent_factory:true,
                               evolution:false,
                               modes:true,
                               skills:true,
-                              tools:true}}).
+                              tools:true,
+                              context_kb:true}}).
 dispatch_operation("session.start", Frame) :- !,
     session_start(Frame).
 dispatch_operation("session.mode", Frame) :- !,
@@ -151,6 +173,8 @@ dispatch_operation("session.cancel", Frame) :- !,
     session_cancel(Frame).
 dispatch_operation("session.inspect", Frame) :- !,
     session_inspect(Frame).
+dispatch_operation("session.kb", Frame) :- !,
+    session_kb(Frame).
 dispatch_operation("skill.load", Frame) :- !,
     skill_load(Frame).
 dispatch_operation("skill.list", Frame) :- !,
@@ -180,8 +204,8 @@ session_start_(Frame) :-
         (   nonvar(Conversation)
         ->  assertz(sidecar_tool_registry(SessionId, Registry)),
             assertz(sidecar_session(SessionId, Conversation)),
-            assertz(sidecar_mode(SessionId, "direct")),
-            reply_ok(Frame, _{started:true, already_started:false, resumed:Resumed, mode:"direct"})
+            assertz(sidecar_mode(SessionId, "symbolic")),
+            reply_ok(Frame, _{started:true, already_started:false, resumed:Resumed, mode:"symbolic"})
         )
     ).
 
@@ -245,7 +269,7 @@ session_mode_(Frame) :-
     (   sidecar_session(SessionId, _)
     ->  (   sidecar_mode(SessionId, Previous)
         ->  true
-        ;   Previous = "direct"
+        ;   Previous = "symbolic"
         ),
         retractall(sidecar_mode(SessionId, _)),
         assertz(sidecar_mode(SessionId, Mode)),
@@ -270,7 +294,7 @@ session_turn(Frame) :-
     ).
 
 %% Turn mode resolution order: explicit payload override, session state,
-%% else direct. Unknown modes are rejected before any provider call.
+%% else symbolic. Unknown modes are rejected before any provider call.
 turn_mode(Frame, Mode) :-
     payload_dict(Frame, Payload),
     (   get_dict(mode, Payload, Requested),
@@ -281,7 +305,7 @@ turn_mode(Frame, Mode) :-
         )
     ;   sidecar_mode(Frame.session_id, Mode)
     ->  true
-    ;   Mode = "direct"
+    ;   Mode = "symbolic"
     ).
 
 start_turn_worker(Frame, Conversation, Mode) :-
@@ -306,21 +330,23 @@ run_turn(Frame, Conversation, Token, Mode) :-
           retractall(sidecar_event_seq(SessionId, RequestId, _)) )).
 
 run_turn_guarded(Frame, Conversation, Token, Mode) :-
-    catch(run_turn_call(Frame, Conversation, Token, Mode, Outcome, Model),
+    catch(run_turn_call(Frame, Conversation, Token, Mode, Outcome, Model, Compaction),
           Error,
           Outcome = exception(Error)),
     (   sidecar_cancelled(Frame.session_id, Frame.request_id)
-    ->  reply_status(Frame, "cancelled", _{},
+    ->  ( nonvar(Compaction) -> CancelPayload = _{meta:_{compaction:Compaction}}
+        ; CancelPayload = _{} ),
+        reply_status(Frame, "cancelled", CancelPayload,
                      _{code:"cancelled", message:"canonical Prolog-RLM turn cancelled"})
     ;   Outcome = ok(Turn)
-    ->  turn_payload(Turn, Model, Mode, Payload),
+    ->  turn_payload(Turn, Model, Mode, Compaction, Payload),
         emit_event(Frame.session_id, Frame.request_id, "turn_finished", _{status:"ok", mode:Mode}),
         reply_ok(Frame, Payload)
     ;   Outcome = error(Error)
-    ->  safe_term_string(Error, Text),
-        error_code(Error, Code),
+    ->  turn_error_details(Error, Code, Details),
         emit_event(Frame.session_id, Frame.request_id, "turn_finished", _{status:"error", mode:Mode, code:Code}),
-        reply_error(Frame, Code, _{message:Text})
+        put_dict(code, Details, Code, StructuredError),
+        reply_status(Frame, "error", _{meta:_{compaction:Compaction}}, StructuredError)
     ;   Outcome = exception(Error)
     ->  safe_term_string(Error, Text),
         emit_event(Frame.session_id, Frame.request_id, "turn_finished", _{status:"error", mode:Mode, code:"runtime_exception"}),
@@ -329,16 +355,106 @@ run_turn_guarded(Frame, Conversation, Token, Mode) :-
         reply_error(Frame, "invalid_turn_outcome", _{message:Text})
     ).
 
-run_turn_call(Frame, Conversation, Token, Mode, Outcome, Model) :-
+run_turn_call(Frame, Conversation, Token, Mode, Outcome, Model, Compaction) :-
     payload_dict(Frame, Payload),
     require_payload_text(Payload, text, Text),
-    turn_provider(Payload, Provider, Model),
+    turn_provider(Payload, _, Model),
     completion_options(Mode, Payload, Token, Frame, CompletionOptions),
+    sidecar_warm_store(WarmStore),
+    auto_warm_options(CompletionOptions, AutoWarm),
+    mode_strategy(Mode, Strategy),
     rlm_conversation_runtime:conversation_turn(
-        Conversation,
-        message(user, Text),
-        [completion_options(CompletionOptions)],
-        Outcome).
+        Conversation, message(user, Text),
+        [strategy(Strategy),
+         context_options([warm_store(WarmStore), auto_warm(AutoWarm)]),
+         completion_options(CompletionOptions)], Outcome),
+    compaction_status(Outcome, Compaction),
+    retractall(sidecar_compaction_status(Frame.session_id, _)),
+    assertz(sidecar_compaction_status(Frame.session_id, Compaction)).
+
+mode_strategy("direct", native) :- !.
+mode_strategy("direct-rlm", native) :- !.
+mode_strategy(_, symbolic).
+
+auto_warm_options(_, disabled) :-
+    getenv('AGENTPROLOG_AUTO_WARM', Flag),
+    memberchk(Flag, ['0', false, off]), !.
+auto_warm_options(Active, [min_batch_messages(1), max_batch_messages(48),
+                           keep_recent_messages(12), completion_options(Safe)]) :-
+    compaction_completion_options(Active, Safe).
+
+compaction_status(ok(Turn), Status) :- !,
+    warm_compaction_status(Turn.context.auto_warm, Status).
+compaction_status(error(Error), Status) :-
+    is_dict(Error), get_dict(auto_warm, Error, Warm), !,
+    warm_compaction_status(Warm, Status).
+compaction_status(error(_), _{state:"turn_failed"}).
+
+warm_compaction_status(Warm, Status) :-
+    ( get_dict(published, Warm, true)
+    -> Warm.source_range = range(Start, End),
+       Base = _{state:"published", start:Start, end:End}
+    ; atom_string(Warm.reason, Reason), Base = _{state:Reason}
+    ),
+    ( get_dict(generation, Warm, Generation), get_dict(usage, Generation, Usage)
+    -> put_dict(usage, Base, Usage, Status)
+    ; Status = Base
+    ).
+
+%% Warm generation only reads the opaque conversation context. It must not
+%% inherit the active coding-agent tool registry, skills, child recursion, or
+%% external effects. Keep the user's cancellation token.
+compaction_completion_options(Active, Safe) :-
+    memberchk(provider(Provider), Active),
+    memberchk(cancel_token(Token), Active),
+    Safe = [provider(Provider),
+            provider_name(openrouter),
+            cancel_token(Token),
+            capabilities([model(openrouter),
+                          context(peek), context(slice), context(search)]),
+            child_capabilities([model(openrouter)]),
+            budget(_{max_total_tokens:8192,
+                     max_model_calls:4,
+                     max_recursion_depth:0})].
+
+%% Read-only project KB projection. Warm summaries are untrusted observations,
+%% never asserted as executable Prolog clauses or promoted to runtime skills.
+session_kb(Frame) :-
+    SessionId = Frame.session_id,
+    ( sidecar_session(SessionId, Conversation)
+    -> sidecar_warm_store(WarmStore),
+       rlm_conversation_warm:conversation_warm_list(
+           Conversation, WarmStore, [history(false)], Outcome),
+       ( Outcome = ok(Artifacts)
+       -> Root = Conversation.metadata.project_root,
+          findall(Observation,
+                  ( member(Artifact, Artifacts),
+                    warm_project_observation(Root, Artifact, Observation)
+                  ),
+                  All),
+          length(All, Count),
+          ( length(Prefix, 100), append(Prefix, _, All)
+          -> Rows = Prefix, Truncated = true
+          ;  Rows = All, Truncated = false
+          ),
+          reply_ok(Frame, _{observations:Rows, count:Count,
+                            truncated:Truncated, provenance:"model_claim"})
+       ;  reply_runtime_outcome(Frame, kb_list, Outcome)
+       )
+    ; reply_error(Frame, "session_not_found", _{message:"unknown session"})
+    ).
+
+warm_project_observation(Root, Artifact, Observation) :-
+    Warm = Artifact.value,
+    Generated = Warm.generated,
+    Warm.source_range = range(Start, End),
+    member(Kind, [facts, decisions, unresolved, entities, topics, files, symbols]),
+    get_dict(Kind, Generated, Values),
+    member(Text, Values),
+    string(Text),
+    Observation = _{project_root:Root, kind:Kind, text:Text,
+                    start:Start, end:End, artifact_key:Artifact.key,
+                    source_class:"model_claim"}.
 
 %% Base completion options shared by every mode.
 base_completion_options(Token, Frame, Provider, [provider(Provider),
@@ -357,7 +473,8 @@ completion_options(Mode, Payload, Token, Frame, Options) :-
     base_completion_options(Token, Frame, Provider, Base),
     mode_options(Mode, Base, Options0),
     apply_budget_updates_or_keep(Options0, Payload, Options1),
-    skill_options(Payload, Options1, Options).
+    enforce_mode_recursion(Mode, Options1, Options2),
+    skill_options(Payload, Options2, Options).
 
 apply_budget_updates_or_keep(Options0, Payload, Options) :-
     payload_budget_updates(Payload, Updates),
@@ -408,26 +525,28 @@ skill_name_string(Name, _) :- throw(error(invalid_skill_name(Name), _)).
 
 mode_options("direct", Base, Options) :- !,
     append(Base,
-           [capabilities([model(openrouter), tool(project_read)]),
+           [capabilities([model(openrouter), tool(project_read),
+                          context(peek), context(slice), context(search)]),
             child_capabilities([model(openrouter), tool(project_read)]),
             budget(_{max_recursion_depth:0})],
            Options).
+mode_options("direct-rlm", Base, Options) :- !,
+    % Preserve canonical completion message projection with bounded RLM children.
+    append(Base,
+           [capabilities([rlm, model(openrouter), tool(project_read),
+                          context(peek), context(slice), context(search)]),
+            child_capabilities([rlm, model(openrouter), tool(project_read),
+                                context(peek), context(slice), context(search)]),
+            budget(_{max_recursion_depth:2})],
+           Options).
 mode_options("symbolic", Base, Options) :- !,
-    % Runtime defaults: root supervisor may select typed plans; child plans
-    % are model-only, so recursion stays at depth 1.
-    Options = Base.
+    append(Base,
+           [capabilities([rlm, model(openrouter), tool(project_read),
+                          context(peek), context(slice), context(search)]),
+            child_capabilities([model(openrouter), tool(project_read)]),
+            budget(_{max_recursion_depth:1})], Options).
 mode_options("symbolic-recursive", Base, Options) :- !,
-    % Child plans may select symbolic work themselves; the depth ceiling
-    % below (and prolog-rlm's own budget validation) bounds the recursion.
-    append(Base, [capabilities([rlm, model(openrouter), tool(project_read),
-                               context(peek), context(slice), context(search)]),
-                  child_capabilities([rlm,
-                                   model(openrouter),
-                                   tool(project_read),
-                                   context(peek),
-                                   context(slice),
-                                   context(search)]),
-               budget(_{max_recursion_depth:2})], Options).
+    mode_options("direct-rlm", Base, Options).
 
 %% Explicit budget updates forwarded from the plugin payload. Absent keys are
 %% skipped; present but non-conforming values are rejected before any
@@ -458,13 +577,27 @@ budget_value(Name, Raw, Value) :-
     ).
 
 apply_budget_updates(Options0, Updates, Options) :-
-    (   member(budget(Budget0), Options0)
-    ->  exclude(is_budget_option, Options0, Rest)
-    ;   rlm_completion:default_completion_budget(Budget0),
+    rlm_completion:default_completion_budget(Default),
+    (   member(budget(Partial), Options0)
+    ->  exclude(is_budget_option, Options0, Rest),
+        put_dict(Partial, Default, Budget0)
+    ;   Budget0 = Default,
         Options0 = Rest
     ),
     put_dict(Updates, Budget0, Budget),
     Options = [budget(Budget)|Rest].
+
+mode_recursion_ceiling("direct", 0).
+mode_recursion_ceiling("direct-rlm", 2).
+
+enforce_mode_recursion(Mode, Options, Options) :-
+    (   member(budget(Budget), Options),
+        get_dict(max_recursion_depth, Budget, Depth),
+        mode_recursion_ceiling(Mode, Ceiling),
+        Depth > Ceiling
+    ->  throw(error(invalid_mode_recursion(Mode, Depth, Ceiling), _))
+    ;   true
+    ).
 
 is_budget_option(budget(_)).
 
@@ -483,7 +616,7 @@ turn_provider(Payload, Provider, Model) :-
     ),
     rlm_chain:openrouter_provider(Model, Provider).
 
-turn_payload(Turn, Model, Mode, Payload) :-
+turn_payload(Turn, Model, Mode, Compaction, Payload) :-
     AssistantText = Turn.assistant.content,
     atom_string(Model, ModelText),
     (   get_dict(completion, Turn, Completion),
@@ -494,12 +627,29 @@ turn_payload(Turn, Model, Mode, Payload) :-
     ;   UsageField = _{}
     ),
     put_dict(UsageField,
-             _{text:AssistantText, provider:"openrouter", model:ModelText, mode:Mode},
+             _{text:AssistantText, provider:"openrouter", model:ModelText, mode:Mode,
+               meta:_{compaction:Compaction}},
              Payload).
 
 %% Structured error classification: budget exhaustion is surfaced as its own
 %% code so callers never parse Prolog terms to distinguish exhausted turns
 %% from generic failures.
+turn_error_details(Error, "budget_exhausted", Details) :-
+    sub_term(Sub, Error),
+    is_dict(Sub),
+    get_dict(kind, Sub, token_budget_exceeded),
+    get_dict(limit, Sub, Limit),
+    get_dict(used, Sub, Used),
+    integer(Limit), integer(Used), !,
+    format(string(Message), "completion token budget exceeded (~d/~d tokens)", [Used, Limit]),
+    Details = _{message:Message, kind:"token_budget_exceeded", limit:Limit, used:Used}.
+turn_error_details(Error, Code, _{message:Text}) :-
+    error_code(Error, Code),
+    safe_term_string(Error, Text).
+
+error_code(Error, "budget_exhausted") :-
+    ( sub_term(Sub, Error), is_dict(Sub),
+      get_dict(kind, Sub, token_budget_exceeded) ), !.
 error_code(Error, "budget_exhausted") :-
     contains_ground_term(Error, max_iterations), !.
 error_code(Error, "budget_exhausted") :-
@@ -556,12 +706,14 @@ session_inspect(Frame) :-
     (   sidecar_session(SessionId, Conversation)
     ->  (   sidecar_mode(SessionId, Mode)
         ->  true
-        ;   Mode = "direct"
+        ;   Mode = "symbolic"
         ),
         rlm_conversation:conversation_stats(Conversation, Outcome),
         (   Outcome = ok(Stats)
         ->  ( sidecar_turn(SessionId, _, _) -> Busy = true ; Busy = false ),
-            reply_ok(Frame, _{session_id:SessionId, busy:Busy, mode:Mode, stats:Stats})
+            ( sidecar_compaction_status(SessionId, C) -> true ; C = _{state:"not_run"} ),
+            reply_ok(Frame, _{session_id:SessionId, busy:Busy, mode:Mode,
+                              stats:Stats, compaction:C})
         ;   reply_runtime_outcome(Frame, inspect, Outcome)
         )
     ;   reply_error(Frame, "session_not_found", _{message:"unknown session"})

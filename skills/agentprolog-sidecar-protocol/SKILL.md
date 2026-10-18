@@ -15,8 +15,8 @@ with per-run monotonic sequences.
 ## Operations
 
 - `runtime.describe` — handshake; capabilities include modes and skills.
-- `session.start` — creates the canonical conversation; default mode direct.
-- `session.mode` — canonical reasoning-mode transition (`direct`,
+- `session.start` — creates the canonical conversation; default mode symbolic.
+- `session.mode` — canonical reasoning-mode transition (`direct`, `direct-rlm`,
   `symbolic`, `symbolic-recursive`); validated against a closed set.
 - `session.turn` — one canonical trajectory. Payload: `text` (required),
   `mode` override, `provider` (openrouter only), `model`,
