@@ -25,7 +25,7 @@ export interface ModeChangeEvent {
 export interface TurnRecord {
   readonly sessionId: string;
   readonly mode: AgentPrologMode;
-  readonly backend: "direct" | "symbolic" | "symbolic-recursive";
+  readonly backend: AgentPrologMode;
   readonly durationMs: number;
   readonly cancelled: boolean;
   readonly error?: string;
