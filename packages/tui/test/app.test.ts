@@ -252,6 +252,20 @@ describe("TUI app", () => {
     await quit;
   });
 
+  it("a natural-language AgentProlog skill question uses the runtime catalog, not chat instructions", async () => {
+    const { app, output, sent, respondTo, quit } = makeHarness();
+    await app.handleLine("/symbolic");
+    const pending = app.handleLine("what skilsl do you have");
+    await until(() => sent.some(frame => frame.operation === "skill.list"));
+    const request = sent.find(frame => frame.operation === "skill.list")!;
+    respondTo(request.request_id, { skills: [{ name: "rlm-operate", description: "Core Prolog-RLM skill" }] });
+    await pending;
+    expect(output.text).toContain("• rlm-operate");
+    expect(sent.filter(frame => frame.operation === "session.turn")).toHaveLength(0);
+    await app.handleLine("/quit");
+    await quit;
+  });
+
   it("inspects canonical status and registered direct tools", async () => {
     const { app, output, sent, quit } = makeHarness();
     await app.handleLine("/status");
