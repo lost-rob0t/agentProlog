@@ -19,6 +19,7 @@ interface Harness {
 function makeHarness(): Harness {
   const sent: RequestFrame[] = [];
   const stopped: string[] = [];
+  const budgetOverrides: Record<string, number> = {};
   const outputBuffer = { text: "" };
   let deferInspection = false;
 
@@ -76,7 +77,7 @@ function makeHarness(): Harness {
         sessionId: request.sessionId,
         text: request.text,
         mode,
-        options: {},
+        options: { ...budgetOverrides },
       }),
   });
 
@@ -99,6 +100,7 @@ function makeHarness(): Harness {
     input: new PassThrough(),
     output,
     tty: false,
+    budgetOverrides,
   });
   app.run(() => quitResolve());
 
@@ -118,11 +120,36 @@ describe("TUI app", () => {
     expect(output.text).toContain("◈ Mode: symbolic");
     expect(app["options"].router.resolveMode("s1")).toBe("symbolic");
 
+    await app.handleLine("/direct-rlm");
+    expect(output.text).toContain("◈ Mode: direct-rlm");
     await app.handleLine("/direct");
     expect(output.text).toContain("◈ Mode: direct");
 
     await app.handleLine("/symbolic-recursive");
     expect(output.text).toContain("◈ Mode: symbolic-recursive");
+    await app.handleLine("/quit");
+    await quit;
+  });
+
+  it("budget overrides forward through the canonical turn adapter", async () => {
+    const { app, output, sent, respondLast, quit } = makeHarness();
+    await app.handleLine("/budget tokens 20480");
+    await app.handleLine("/budget model-calls 8");
+    await app.handleLine("/budget tokens -1");
+    await app.handleLine("/budget");
+    expect(output.text).toContain("max_total_tokens=20480");
+    expect(output.text).toContain("max_model_calls=8");
+    expect(output.text).toContain("Usage: /budget");
+    const pending = app.handleLine("short request");
+    await until(() => sent.some(frame => frame.operation === "session.turn"));
+    expect(sent.find(frame => frame.operation === "session.turn")!.payload).toMatchObject({
+      max_total_tokens: 20480, max_model_calls: 8,
+    });
+    respondLast({ text: "answer" });
+    await pending;
+    await app.handleLine("/budget reset");
+    await app.handleLine("/budget");
+    expect(output.text).toContain("runtime defaults");
     await app.handleLine("/quit");
     await quit;
   });
