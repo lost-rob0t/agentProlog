@@ -10,6 +10,10 @@ export interface AdapterOptions {
   readonly model?: string | null;
   /** Explicit recursion ceiling for symbolic-recursive turns (>= 1). */
   readonly maxRecursionDepth?: number;
+  readonly max_total_tokens?: number;
+  readonly max_model_calls?: number;
+  readonly max_tool_calls?: number;
+  readonly max_iterations?: number;
 }
 
 export interface TurnExecution {
@@ -44,7 +48,15 @@ export async function executeTurnViaBridge(
   };
   if (execution.options.provider !== undefined) payload.provider = execution.options.provider;
   if (execution.options.model !== undefined) payload.model = execution.options.model;
-  if (execution.mode === "symbolic-recursive") {
+  for (const field of ["max_total_tokens", "max_model_calls", "max_tool_calls", "max_iterations"] as const) {
+    const value = execution.options[field];
+    if (value === undefined) continue;
+    if (!Number.isSafeInteger(value) || value < 1) {
+      throw new ProtocolError("invalid_budget_field", field + " must be a positive safe integer");
+    }
+    payload[field] = value;
+  }
+  if (execution.mode === "symbolic-recursive" || execution.mode === "direct-rlm") {
     const depth = execution.options.maxRecursionDepth;
     if (depth !== undefined && (!Number.isSafeInteger(depth) || depth < 1)) {
       throw new ProtocolError("invalid_recursion_depth", "maxRecursionDepth must be a positive integer");
