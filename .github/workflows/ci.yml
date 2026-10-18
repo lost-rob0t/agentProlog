@@ -32,4 +32,5 @@ jobs:
             pnpm build
             pnpm typecheck
             pnpm test
+            swipl -q -s test/direct_tool_test.pl
           '
