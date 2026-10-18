@@ -22,6 +22,8 @@ cancellation, and malformed frames fail closed; nothing silently restarts.
 :- use_module(library(http/json)).
 :- use_module(library(readutil)).
 :- use_module(library(rlm_chain), []).
+:- use_module(library(rlm_artifact), []).
+:- use_module(library(rlm_conversation_warm), []).
 :- use_module(library(rlm_completion), []).
 :- use_module(library(rlm_conversation), []).
 :- use_module(library(rlm_conversation_runtime), []).
@@ -29,6 +31,8 @@ cancellation, and malformed frames fail closed; nothing silently restarts.
 :- use_module(library(rlm_tool), []).
 
 :- dynamic sidecar_store/1.
+:- dynamic sidecar_warm_store/1.
+:- dynamic sidecar_compaction_status/2.
 :- dynamic sidecar_session/2.
 :- dynamic sidecar_mode/2.
 :- dynamic sidecar_turn/3.
@@ -54,6 +58,10 @@ open_runtime :-
     rlm_conversation:conversation_store_open(StoreSpec, Outcome),
     require_ok(store_open, Outcome, Store),
     assertz(sidecar_store(Store)),
+    warm_store_spec(WarmSpec),
+    rlm_artifact:artifact_store_open(WarmSpec, ArtifactOutcome),
+    require_ok(warm_store_open, ArtifactOutcome, WarmStore),
+    assertz(sidecar_warm_store(WarmStore)),
     % The catalog starts from the runtime default (prolog-rlm's core
     % operating skills when shipped with the pack); loaded project roots
     % merge on top instead of replacing the core skills.
@@ -67,13 +75,24 @@ conversation_store_spec(persist(File)) :-
     !.
 conversation_store_spec(memory).
 
+warm_store_spec(persist(WarmFile)) :-
+    getenv('AGENTPROLOG_CONVERSATION_STORE', File),
+    File \== "", !,
+    format(string(WarmFile), '~w.warm.db', [File]).
+warm_store_spec(memory).
+
 close_runtime :-
     cancel_all_turns,
+    (   retract(sidecar_warm_store(WarmStore))
+    ->  rlm_artifact:artifact_store_close(WarmStore, _)
+    ;   true
+    ),
     (   retract(sidecar_store(Store))
     ->  rlm_conversation:conversation_store_close(Store, _)
     ;   true
     ),
     retractall(sidecar_session(_, _)),
+    retractall(sidecar_compaction_status(_, _)),
     retractall(sidecar_mode(_, _)),
     retractall(sidecar_turn(_, _, _)),
     retractall(sidecar_cancelled(_, _)),
@@ -121,7 +140,8 @@ dispatch_operation("runtime.describe", Frame) :- !,
                               evolution:false,
                               modes:true,
                               skills:true,
-                              tools:true}}).
+                              tools:true,
+                              context_kb:true}}).
 dispatch_operation("session.start", Frame) :- !,
     session_start(Frame).
 dispatch_operation("session.mode", Frame) :- !,
@@ -132,6 +152,8 @@ dispatch_operation("session.cancel", Frame) :- !,
     session_cancel(Frame).
 dispatch_operation("session.inspect", Frame) :- !,
     session_inspect(Frame).
+dispatch_operation("session.kb", Frame) :- !,
+    session_kb(Frame).
 dispatch_operation("skill.load", Frame) :- !,
     skill_load(Frame).
 dispatch_operation("skill.list", Frame) :- !,
@@ -283,14 +305,14 @@ run_turn(Frame, Conversation, Token, Mode) :-
           retractall(sidecar_event_seq(SessionId, RequestId, _)) )).
 
 run_turn_guarded(Frame, Conversation, Token, Mode) :-
-    catch(run_turn_call(Frame, Conversation, Token, Mode, Outcome, Model),
+    catch(run_turn_call(Frame, Conversation, Token, Mode, Outcome, Model, Compaction),
           Error,
           Outcome = exception(Error)),
     (   sidecar_cancelled(Frame.session_id, Frame.request_id)
     ->  reply_status(Frame, "cancelled", _{},
                      _{code:"cancelled", message:"canonical Prolog-RLM turn cancelled"})
     ;   Outcome = ok(Turn)
-    ->  turn_payload(Turn, Model, Mode, Payload),
+    ->  turn_payload(Turn, Model, Mode, Compaction, Payload),
         emit_event(Frame.session_id, Frame.request_id, "turn_finished", _{status:"ok", mode:Mode}),
         reply_ok(Frame, Payload)
     ;   Outcome = error(Error)
@@ -305,15 +327,20 @@ run_turn_guarded(Frame, Conversation, Token, Mode) :-
         reply_error(Frame, "invalid_turn_outcome", _{message:Text})
     ).
 
-run_turn_call(Frame, Conversation, Token, Mode, Outcome, Model) :-
+run_turn_call(Frame, Conversation, Token, Mode, Outcome, Model, Compaction) :-
     payload_dict(Frame, Payload),
     require_payload_text(Payload, text, Text),
     turn_provider(Payload, Provider, Model),
     completion_options(Mode, Payload, Token, Frame, CompletionOptions),
+    compact_conversation(Conversation, Mode, CompletionOptions, Compaction),
+    retractall(sidecar_compaction_status(Frame.session_id, _)),
+    assertz(sidecar_compaction_status(Frame.session_id, Compaction)),
+    sidecar_warm_store(WarmStore),
     rlm_conversation_runtime:conversation_turn(
         Conversation,
         message(user, Text),
-        [completion_options(CompletionOptions)],
+        [context_options([warm_store(WarmStore)]),
+         completion_options(CompletionOptions)],
         Outcome).
 
 %% Base completion options shared by every mode.
@@ -481,7 +508,7 @@ turn_provider(Payload, Provider, Model) :-
     ),
     rlm_chain:openrouter_provider(Model, Provider).
 
-turn_payload(Turn, Model, Mode, Payload) :-
+turn_payload(Turn, Model, Mode, Compaction, Payload) :-
     AssistantText = Turn.assistant.content,
     atom_string(Model, ModelText),
     (   get_dict(completion, Turn, Completion),
@@ -492,7 +519,8 @@ turn_payload(Turn, Model, Mode, Payload) :-
     ;   UsageField = _{}
     ),
     put_dict(UsageField,
-             _{text:AssistantText, provider:"openrouter", model:ModelText, mode:Mode},
+             _{text:AssistantText, provider:"openrouter", model:ModelText, mode:Mode,
+               meta:_{compaction:Compaction}},
              Payload).
 
 %% Structured error classification: budget exhaustion is surfaced as its own
@@ -575,7 +603,9 @@ session_inspect(Frame) :-
         rlm_conversation:conversation_stats(Conversation, Outcome),
         (   Outcome = ok(Stats)
         ->  ( sidecar_turn(SessionId, _, _) -> Busy = true ; Busy = false ),
-            reply_ok(Frame, _{session_id:SessionId, busy:Busy, mode:Mode, stats:Stats})
+            ( sidecar_compaction_status(SessionId, C) -> true ; C = _{state:"not_run"} ),
+            reply_ok(Frame, _{session_id:SessionId, busy:Busy, mode:Mode,
+                              stats:Stats, compaction:C})
         ;   reply_runtime_outcome(Frame, inspect, Outcome)
         )
     ;   reply_error(Frame, "session_not_found", _{message:"unknown session"})
