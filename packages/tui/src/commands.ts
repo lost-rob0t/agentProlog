@@ -52,3 +52,11 @@ export function helpText(): string {
     "/quit                 exit (Ctrl+D; Ctrl+C cancels a running turn first)",
   ].join("\n");
 }
+
+/** Resolve only explicit runtime-inventory questions locally against the canonical catalog. */
+export function inventoryCommand(text: string): "skills" | "tools" | undefined {
+  const normalized = text.trim().toLowerCase().replace(/[?.!]+$/u, "").trim();
+  if (/^(?:what|which) (?:skills?|skilsl) (?:do you have|does agentprolog have|are (?:loaded|installed|available))$/u.test(normalized)) return "skills";
+  if (/^(?:what|which) tools? (?:do you have|does agentprolog have|are (?:loaded|installed|available))$/u.test(normalized)) return "tools";
+  return undefined;
+}
