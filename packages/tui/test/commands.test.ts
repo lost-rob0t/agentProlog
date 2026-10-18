@@ -21,8 +21,9 @@ describe("TUI input parsing", () => {
     expect(parseInput("/MODE")).toEqual({ kind: "command", name: "mode", args: "" });
   });
 
-  it("recognizes exactly the three mode commands", () => {
+  it("recognizes all four mode commands", () => {
     expect(resolveModeCommand("direct")).toBe("direct");
+    expect(resolveModeCommand("direct-rlm")).toBe("direct-rlm");
     expect(resolveModeCommand("symbolic")).toBe("symbolic");
     expect(resolveModeCommand("symbolic-recursive")).toBe("symbolic-recursive");
     expect(resolveModeCommand("auto")).toBeUndefined();
@@ -32,6 +33,8 @@ describe("TUI input parsing", () => {
   it("help text lists every registered command", () => {
     const help = helpText();
     expect(help).toContain("/direct");
+    expect(help).toContain("/direct-rlm");
+    expect(help).toContain("/budget");
     expect(help).toContain("/symbolic");
     expect(help).toContain("/symbolic-recursive");
     expect(help).toContain("/mode");
