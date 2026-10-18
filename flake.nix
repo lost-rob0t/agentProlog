@@ -9,7 +9,7 @@
     # public `prolog_rlm` pack built by that flake; bump this pin together
     # with the exact upstream head recorded in the PR verification evidence.
     prolog-rlm = {
-      url = "github:lost-rob0t/prolog-rlm/9735394c25022cc06619fcd67576507918cf62fb";
+      url = "github:lost-rob0t/prolog-rlm/d4e639e93f7598f2ba4735daac1cd4ad62355a8b";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -21,12 +21,12 @@
         swiProlog = pkgs.swi-prolog;
         prologRlm = prolog-rlm.packages.${system}.prolog-rlm;
         prologRlmPack = "${prologRlm}/share/swi-prolog/pack";
-        prologRlmRev = "9735394c25022cc06619fcd67576507918cf62fb";
+        prologRlmRev = "d4e639e93f7598f2ba4735daac1cd4ad62355a8b";
 
         # Persistent Prolog sidecar consumed by the DSH plugin as
         # config.command. The wrapper pins both the SWI-Prolog build and the
         # prolog-rlm pack closure, so no host swipl installation is used.
-        # prolog-rlm's skills/core tree ships inside the pack because
+        # The upstream pack includes its skills/core tree because
         # rlm_skill's default catalog resolves relative to its own source
         # location; without it the runtime's operating skills are absent.
         sidecar = pkgs.stdenvNoCC.mkDerivation {
@@ -40,7 +40,6 @@
             packRoot="$out/share/swi-prolog/pack"
             mkdir -p "$packRoot/prolog_rlm" "$out/lib/agentprolog" "$out/bin"
             cp -r "${prologRlmPack}/prolog_rlm/." "$packRoot/prolog_rlm/"
-            cp -r "${prolog-rlm}/skills" "$packRoot/prolog_rlm/skills"
             cp agentprolog_dsh_sidecar.pl "$out/lib/agentprolog/"
             makeWrapper ${swiProlog}/bin/swipl "$out/bin/agentprolog-sidecar" \
               --add-flags "-q" \
@@ -84,7 +83,7 @@
             export HOME="$TMPDIR/home"
             mkdir -p "$HOME"
             cd "$TMPDIR"
-            SWIPL_PACK_PATH="${prologRlmPack}" swipl -q -g "use_module(library(rlm)),rlm:rlm_ready,halt"
+            SWIPL_PACK_PATH="${prologRlmPack}" swipl -q -g "use_module(library(rlm)),rlm:rlm_ready,rlm_skill:skill_default_catalog(ok(C)),rlm_skill:skill_catalog_skills(C,[_|_]),halt"
             touch "$out"
           '';
 
