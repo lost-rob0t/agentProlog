@@ -18,7 +18,7 @@ AgentProlog makes [Prolog-RLM](https://github.com/lost-rob0t/prolog-rlm) the can
                              |
         +--------------------+--------------------+
         |          mode router + skills           |
-        |  /direct  /symbolic  /symbolic-recursive|
+        |  /direct  /direct-rlm  /symbolic  |
         +--------------------+--------------------+
                              |
                      Prolog sidecar (NDJSON/stdio)
@@ -42,13 +42,15 @@ This builds the workspace and launches the AgentProlog TUI over the Nix-pinned P
 
 | Input | Effect |
 | --- | --- |
-| `/direct` `/symbolic` `/symbolic-recursive` | Switch the session's reasoning mode (canonical router transition) |
+| `/direct` `/direct-rlm` `/symbolic` `/symbolic-recursive` | Switch the session's reasoning mode (canonical router transition) |
+| `/budget` `/budget tokens 20480` `/budget reset` | Inspect, override, or reset the current mode's bounded execution budget |
+| `/kb` | Read project-scoped model-derived warm-context observations (max 100 results) |
 | `/mode [name]` | Show or set the reasoning mode |
 | `/skills` | List skills loaded into the runtime catalog |
 | `/skill load <root>` | Add project skills through the canonical confined catalog |
 | `/skill reset` | Return to the runtime's core skills |
 | `/tools` | List tools registered for this session |
-| `/status` | Inspect the sidecar's session id, mode, and running state |
+| `/status` | Inspect session id, mode, running state and last compaction status |
 | `/clear` `/quit` | Clear the transcript / exit |
 | any other text | Submitted as one canonical Prolog-RLM turn in the current mode |
 
@@ -69,10 +71,34 @@ One session-scoped router resolves exactly one backend per turn. Mode transition
 | Command | Mode | Execution |
 | --- | --- | --- |
 | `/direct` | `direct` | Bounded non-symbolic turn through the canonical Prolog-RLM conversation boundary. No symbolic planning, no recursion: the sidecar grants no `rlm` capability and caps recursion depth at 0. |
+| `/direct-rlm` | `direct-rlm` | Direct-or-plan completion path with bounded recursive child operations (depth <= 2) on the same managed message projection. Not yet native `rlm_direct/4` parity. |
 | `/symbolic` | `symbolic` | The Prolog-RLM direct-or-plan supervisor: typed symbolic plans, one recursion level (runtime defaults). |
 | `/symbolic-recursive` | `symbolic-recursive` | Bounded recursive RLM decomposition: child plans may select symbolic work, with an explicit `max_recursion_depth` budget on top of Prolog-RLM's own iteration/budget ceilings. |
 
 The default mode is `direct`. Modes are validated against a closed set; unknown modes are rejected, never coerced. Symbolic failures propagate as structured, fail-closed errors — there is **no** silent fallback to direct mode.
+
+### Automatic warm context and project KB projection
+
+`/direct` and `/direct-rlm` reuse Prolog-RLM's existing immutable
+conversation/warm-artifact stores. After at least 24 old unprocessed messages
+become eligible, the sidecar derives a warm artifact covering up to 48 old
+messages; the latest 12 remain hot. The default is on; disable via
+`AGENTPROLOG_AUTO_WARM=0`. Compaction costs an additional bounded model call
+sequence (at most 4 model calls, 8,192 execution tokens). It may fail without
+interrupting the user's turn; `/status` and turn metadata report failures.
+The generator can read bounded opaque conversation context but does not
+inherit project tools, skills or recursive authority.
+
+Published summaries are not executable clauses. `/kb` shows a read-only
+Prolog-derived, project-scoped observation projection from the model claims,
+not yet a full semantic project KB. The original history is never rewritten.
+
+Each mode has its own `/budget` overrides scoped to the current TUI session.
+Use `/budget tokens 20480` in `/symbolic` to raise that mode's **completion
+execution budget** from the 8,192-token upstream default without altering
+`/direct`. Valid bounded fields are `tokens`, `model-calls`, `tool-calls`
+and `iterations`. These do not change the provider's context window or
+grant additional tool authority.
 
 ## Installation and development
 
@@ -104,6 +130,7 @@ The plugin has no TUI dependency. Headless coverage:
 - `pnpm test` — the full unit suite (router isolation, mode commands, adapter payload shaping, bridge correlation, fail-closed transport).
 - `packages/agentprolog/test/headless.integration.test.ts` — drives the real Prolog sidecar process (set `AGENTPROLOG_SIDECAR`; the dev shell sets it for you) through describe/start/mode/inspect/cancel paths without any API key.
 - `nix flake check` — pure checks: pinned prolog-rlm pack load, sidecar protocol smoke, and mode-validation fail-closed behavior.
+- `swipl -q -s test/direct_tool_test.pl` — mode capability boundaries, compaction authority isolation and structured budget-error tests (also run by GitHub CI).
 
 A live model turn additionally needs an OpenRouter-compatible key in the environment (see `.env.example`); everything else — composition, command dispatch, mode transitions, approvals rendering — works keyless.
 
@@ -116,7 +143,7 @@ A live model turn additionally needs an OpenRouter-compatible key in the environ
 - Session resume, steer/inject, and maintenance operations are not implemented yet and fail closed.
 - The canonical sidecar runtime currently speaks to an OpenRouter-compatible provider (`defaults.model` selects the model); DSH-side provider selection applies to DSH surfaces.
 - DSH compatibility is pinned fail-closed to `0.1.2-rc.1` / `a66e4702047846cdaa10c66c9d3df3951f5ea70d`. DeepSeek Harness `0.1.1-rc.2` and earlier are rejected because of CVE-2026-82533. Exact package pins are part of the security boundary; see [docs/security.md](docs/security.md).
-- No TUI ships in this repository; the recommendation and integration plan live in [docs/adr/0001-dsh-tui-selection.md](docs/adr/0001-dsh-tui-selection.md).
+- The terminal TUI lives under `packages/tui`; desktop/Android Workbench surfaces remain separate work.
 
 ## Repository layout
 
