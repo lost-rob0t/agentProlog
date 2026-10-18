@@ -11,7 +11,7 @@ import {
   type Bridge,
   type RequestFrame,
 } from "@agentprolog/dsh";
-import { helpText, parseInput, resolveModeCommand } from "./commands.js";
+import { helpText, parseInput, resolveModeCommand, inventoryCommand } from "./commands.js";
 import { dim, Spinner } from "./render.js";
 
 export interface AppTransport {
@@ -113,7 +113,9 @@ export class App {
       if (parsed.kind === "command") {
         await this.handleCommand(parsed);
       } else {
-        await this.submitTurn(parsed.text);
+        const inventory = inventoryCommand(parsed.text);
+        if (inventory) await this.handleCommand({ name: inventory, args: "" });
+        else await this.submitTurn(parsed.text);
       }
     } catch (error) {
       // Stopping intentionally rejects in-flight requests (bridge disposal);
@@ -328,9 +330,7 @@ export class App {
 
   private printError(error: unknown): void {
     const protocol = error as { code?: string; message?: string };
-    const code = typeof (protocol as { runtimeCode?: string })?.runtimeCode === "string"
-      ? (protocol as { runtimeCode: string }).runtimeCode
-      : typeof protocol?.code === "string" ? protocol.code : "error";
+    const code = typeof protocol?.code === "string" ? protocol.code : "error";
     const message = error instanceof Error ? error.message : String(error);
     this.printLine(`✗ [${code}] ${message}`);
   }
