@@ -343,6 +343,92 @@ run_turn_call(Frame, Conversation, Token, Mode, Outcome, Model, Compaction) :-
          completion_options(CompletionOptions)],
         Outcome).
 
+%% AgentProlog uses the pinned canonical warm API. The product only selects
+%% eligible old ranges; generation, validation, provenance and storage belong
+%% to rlm_conversation_warm and rlm_artifact. This compatibility adapter can
+%% be replaced by upstream managed auto_warm once the Nix pin is updated.
+compact_conversation(_, Mode, _, _{state:"not_applicable"}) :-
+    \+ memberchk(Mode, ["direct", "direct-rlm"]), !.
+compact_conversation(_, _, _, _{state:"disabled"}) :-
+    getenv('AGENTPROLOG_AUTO_WARM', Flag),
+    format(string(Text), '~w', [Flag]),
+    memberchk(Text, ["0", "false", "off"]), !.
+compact_conversation(Conversation, _, CompletionOptions, Status) :-
+    catch(compact_conversation_(Conversation, CompletionOptions, Status),
+          Error,
+          ( safe_term_string(Error, Reason),
+            Status = _{state:"failed", reason:Reason} )).
+
+compact_conversation_(Conversation, CompletionOptions, Status) :-
+    sidecar_warm_store(WarmStore),
+    rlm_conversation:conversation_stats(Conversation, StatsOutcome),
+    require_ok(warm_stats, StatsOutcome, Stats),
+    rlm_conversation_warm:conversation_warm_list(
+        Conversation, WarmStore, [history(false)], ListOutcome),
+    require_ok(warm_list, ListOutcome, Artifacts),
+    findall(End,
+            ( member(Artifact, Artifacts),
+              get_dict(value, Artifact, Warm),
+              get_dict(source_range, Warm, range(_, End)),
+              integer(End)
+            ),
+            Ends),
+    ( Ends == [] -> Last = 0 ; max_list(Ends, Last) ),
+    % Only cold source messages are eligible. Keep the recent 12 messages hot.
+    Eligible is max(0, Stats.messages-12),
+    Start is Last+1,
+    Available is Eligible-Start+1,
+    ( Available >= 24
+    -> End is min(Eligible, Start+47),
+       rlm_conversation_warm:conversation_warm_publish(
+           Conversation, WarmStore, range(Start, End),
+           [completion_options(CompletionOptions)], PublishOutcome),
+       require_ok(warm_publish, PublishOutcome, Published),
+       Status = _{state:"published", start:Start, end:End,
+                  key:Published.artifact.key}
+    ;  Status = _{state:"below_threshold", eligible_through:Eligible,
+                  last_covered:Last}
+    ).
+
+%% Read-only project KB projection. Warm summaries are untrusted observations,
+%% never asserted as executable Prolog clauses or promoted to runtime skills.
+session_kb(Frame) :-
+    SessionId = Frame.session_id,
+    ( sidecar_session(SessionId, Conversation)
+    -> sidecar_warm_store(WarmStore),
+       rlm_conversation_warm:conversation_warm_list(
+           Conversation, WarmStore, [history(false)], Outcome),
+       ( Outcome = ok(Artifacts)
+       -> Root = Conversation.metadata.project_root,
+          findall(Observation,
+                  ( member(Artifact, Artifacts),
+                    warm_project_observation(Root, Artifact, Observation)
+                  ),
+                  All),
+          length(All, Count),
+          ( length(Prefix, 100), append(Prefix, _, All)
+          -> Rows = Prefix, Truncated = true
+          ;  Rows = All, Truncated = false
+          ),
+          reply_ok(Frame, _{observations:Rows, count:Count,
+                            truncated:Truncated, provenance:"model_claim"})
+       ;  reply_runtime_outcome(Frame, kb_list, Outcome)
+       )
+    ; reply_error(Frame, "session_not_found", _{message:"unknown session"})
+    ).
+
+warm_project_observation(Root, Artifact, Observation) :-
+    Warm = Artifact.value,
+    Generated = Warm.generated,
+    Warm.source_range = range(Start, End),
+    member(Kind, [facts, decisions, unresolved, entities, topics, files, symbols]),
+    get_dict(Kind, Generated, Values),
+    member(Text, Values),
+    string(Text),
+    Observation = _{project_root:Root, kind:Kind, text:Text,
+                    start:Start, end:End, artifact_key:Artifact.key,
+                    source_class:"model_claim"}.
+
 %% Base completion options shared by every mode.
 base_completion_options(Token, Frame, Provider, [provider(Provider),
                                                  provider_name(openrouter),
