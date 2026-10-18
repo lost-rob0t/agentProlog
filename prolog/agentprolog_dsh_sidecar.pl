@@ -382,15 +382,32 @@ compact_conversation_(Conversation, CompletionOptions, Status) :-
     Available is Eligible-Start+1,
     ( Available >= 24
     -> End is min(Eligible, Start+47),
+       compaction_completion_options(CompletionOptions, SafeOptions),
        rlm_conversation_warm:conversation_warm_publish(
            Conversation, WarmStore, range(Start, End),
-           [completion_options(CompletionOptions)], PublishOutcome),
+           [completion_options(SafeOptions)], PublishOutcome),
        require_ok(warm_publish, PublishOutcome, Published),
        Status = _{state:"published", start:Start, end:End,
                   key:Published.artifact.key}
     ;  Status = _{state:"below_threshold", eligible_through:Eligible,
                   last_covered:Last}
     ).
+
+%% Warm generation only reads the opaque conversation context. It must not
+%% inherit the active coding-agent tool registry, skills, child recursion, or
+%% external effects. Keep the user's cancellation token.
+compaction_completion_options(Active, Safe) :-
+    memberchk(provider(Provider), Active),
+    memberchk(cancel_token(Token), Active),
+    Safe = [provider(Provider),
+            provider_name(openrouter),
+            cancel_token(Token),
+            capabilities([model(openrouter),
+                          context(peek), context(slice), context(search)]),
+            child_capabilities([model(openrouter)]),
+            budget(_{max_total_tokens:8192,
+                     max_model_calls:4,
+                     max_recursion_depth:0})].
 
 %% Read-only project KB projection. Warm summaries are untrusted observations,
 %% never asserted as executable Prolog clauses or promoted to runtime skills.
