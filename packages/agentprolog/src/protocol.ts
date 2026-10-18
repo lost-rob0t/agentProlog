@@ -16,6 +16,7 @@ const BASE_OPERATIONS: ReadonlySet<string> = new Set([
   "session.turn",
   "session.cancel",
   "session.inspect",
+  "session.kb",
   "skill.load",
   "skill.list",
   "skill.reset",
