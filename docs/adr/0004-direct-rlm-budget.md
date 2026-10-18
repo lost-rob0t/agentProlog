@@ -1,59 +1,27 @@
-# ADR 0004 — Direct-RLM and operator budget controls
+# ADR 0004 — Managed native turns and separate budgets
 
-Status: draft. Stacked on PR #48.
+Status: draft, stacked on PR #48. Requires the exact upstream PR #519 pin.
 
-AgentProlog exposes `direct-rlm` over the shared Prolog-RLM completion runtime. This mode admits bounded RLM child operations (depth at most 2), unlike `direct` (depth 0). It does not yet claim to invoke the distinct upstream `rlm_direct/4` native-loop strategy. That requires a reviewed canonical managed-native-turn entrypoint upstream.
+`direct` and `direct-rlm` invoke the canonical managed `strategy(native)` path,
+which uses `rlm_direct/4`. Direct grants project reads and opaque result
+inspection without recursion; direct-rlm adds bounded recursive operations.
+Symbolic is the startup default. Both symbolic modes explicitly grant project
+read authority to the parent before narrowing children.
 
-The TUI accepts per-mode, per-session overrides through `/budget`; defaults remain Prolog-RLM's values. A setting in `/symbolic` does not affect `/direct` or `/direct-rlm`. The upstream 8192 limit is a **completion execution token budget**, not a provider context window. Explicit overrides cannot bypass the mode recursion ceilings.
+Skill controls use flat canonical unary options; loading skills does not grant
+authority. Execution budgets are per mode and per session. The 8192 execution
+limit counts cumulative prompt and completion usage, separately from the
+131072 context window. Provider output caps do not reserve prompt costs;
+last-response overruns are reported and further execution stops.
 
-Structured token-budget errors retain `kind`, `used` and `limit`. Explicit AgentProlog skills/tools inventory questions in the TUI resolve to the canonical catalog rather than infer runtime skills from conversation instructions.
+The sidecar consumes the upstream opt-in warm publisher rather than maintaining
+a second range-selection implementation. Publication uses estimated context
+pressure and fills the first uncovered interval. Batches are bounded to 48;
+the source transcript is immutable and has no lifetime cap. Compaction has its
+own bounded completion and separately reported usage. It cannot inherit the
+project registry, active skills or recursive authority.
 
-## Product warm-context integration
-
-The AgentProlog sidecar uses the pinned, existing `rlm_artifact` and
-`rlm_conversation_warm` public APIs. By default, for `direct` and
-`direct-rlm` only, it publishes a **maximum of 48** completed
-historical messages after at least **24 eligible unprocessed messages**
-accumulate, keeping the newest 12 messages hot. Set
-`AGENTPROLOG_AUTO_WARM=0` to disable this product-layer producer.
-This is a message-count threshold, not measured token-pressure compaction.
-
-Production derives new immutable warm artifacts and reuses their
-representation-selected context on the managed turn. Old messages stay
-durable and cold-addressable, including when generation fails.
-The model-based generator may incur **an additional completion** with
-its own budget (8192 execution tokens, at most 4 model calls, recursion depth
-zero); there is not yet a joint token/cost reservation with the enclosing
-managed turn. The generator receives only its provider, cancellation token,
-and opaque context-read capabilities, **not** coding tools, the project read
-registry, active skills, or recursive child authority. Failures are reported
-as compaction status and are not silently treated as successful compaction.
-
-A sidecar companion artifact store is derived from the admitted
-private conversation store path with suffix `.warm.db`.
-The `session.kb` protocol operation and `/kb` command project
-**read-only** typed observation records from warm summaries, scoped
-to the admitted conversation/project root. These are
-`model_claim` observations, not trusted runtime facts or executable
-Prolog clauses. The TUI output is capped at 100 observations; it
-reports truncation. `/status` exposes the last compaction status.
-The canonical runtime skills catalog is independent of those records.
-
-## Remaining work
-
-- Native `rlm_direct/4` message/tool projection as a managed
-  conversation strategy; `direct-rlm` currently uses the canonical
-  `rlm_completion` direct-or-plan supervisor.
-- Upstream PR #519 provides a generic opt-in warm publisher with
-  explicit batch options; adopt a reviewed upstream release/pin
-  instead of maintaining the product wrapper indefinitely.
-- A full semantic Prolog project-KB materialization, typed
-  relational observation indexing and provenance-aware querying,
-  not just the current read-only warm-context observation projection.
-- Durable multi-writer concurrency guarantees, restart crash tests,
-  token-pressure thresholds and live provider verification.
-
-Do not claim all of these follow-ups are done because
-the TypeScript and keyless sidecar checks pass.
-
-Never edit immutable source messages, grant executable authority to extracted claims, or install a chat preference as a trusted skill.
+`/kb` remains a read-only projection of attributable model claims, not trusted
+executable facts. Native-loop deterministic tests do not establish live
+provider behavior. Credentialed live tests, multi-writer publication safety,
+and full project semantic materialization remain unverified or out of scope.
