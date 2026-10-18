@@ -5,7 +5,7 @@
 :- begin_tests(direct_tool).
 
 test(project_read_is_registered_and_confined) :-
-    agentprolog_dsh_sidecar:session_tool_registry(_{payload:_{cwd:"."}}, Registry),
+    agentprolog_dsh_sidecar:session_tool_registry(".", Registry),
     setup_call_cleanup(
         true,
         ( rlm_tool:tool_invoke(Registry, [tool(project_read)], project_read,
