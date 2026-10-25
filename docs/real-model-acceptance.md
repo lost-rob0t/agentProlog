@@ -14,6 +14,14 @@ access with sufficient quota. Missing authorization, wrong commit, missing
 credential, unsupported runtime adapter or failed task produces failure, not a
 passing skipped acceptance test.
 
+GitHub requires a manual workflow to exist on the default branch before it can
+be dispatched. This workflow is currently delivered in draft PR #51, so adding
+the secret alone does not make it runnable. Registering the workflow requires a
+separately reviewed bootstrap change on the default branch; do not merge the
+unfinished product merely to enable acceptance. After registration, select the
+reviewed feature branch and its exact commit. See
+[GitHub's manual workflow requirements](https://docs.github.com/actions/managing-workflow-runs/manually-running-a-workflow).
+
 The model is `glm-5.3-flash`. The trusted acceptance profile calls upstream
 `zai_coding_provider(chat_completions, 'glm-5.3-flash', Provider)`, which uses
 `https://api.z.ai/api/coding/paas/v4/chat/completions` and
@@ -41,7 +49,8 @@ The USD 0.10 runtime budget is an additional guard, not a guarantee that all
 providers supply billing data; the run requires existing authorized quota and
 must not initiate unapproved pay-as-you-go spending.
 
-Evidence contains the exact application/runtime commits, actual provider/model,
+Evidence contains the exact application/runtime commits, observed provider/model
+(null when runtime metadata is unavailable),
 latency, available numeric token/cost fields, approval count, tool names and
 verified final bytes. Raw provider diagnostics, prompts, response bodies and
 credentials are not uploaded. Absence of cost information must remain unknown,
