@@ -20,6 +20,7 @@ validate(Result, approval(_{text:Result.value, fixture:true})).
 model(failure, _, _, _) :- throw(error(deliberate_fixture_failure,_)).
 model(Scenario, Root, Request, ok(Response)) :-
     findall(M, (member(M,Request.messages),M.role==tool), Messages), length(Messages, N),
+    (Scenario == slow -> directory_file_path(Root,'model-started',StartMarker), setup_call_cleanup(open(StartMarker,write,Start),write(Start,started),close(Start)) ; true),
     step(Scenario,N,Messages,Text,Calls),
     (Scenario == slow -> directory_file_path(Root,'model-completed',Marker), setup_call_cleanup(open(Marker,write,S),write(S,completed),close(S)) ; true),
     Response=model_response{provider:fake,requested_model:fake,selected_model:fake,

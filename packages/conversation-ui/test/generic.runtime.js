@@ -1,11 +1,12 @@
 // Full generic host process with mocked model I/O, real native tools and files.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile, access, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, access, rm, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { once } from 'node:events';
+import { spawn, execFileSync } from 'node:child_process';
 import { Client } from '../src/client.js';
 import { render } from '../src/render.js';
 const repo = fileURLToPath(new URL('../../../', import.meta.url));
@@ -65,6 +66,7 @@ test('generic artifact approval allow and deny preserve canonical truth', async 
 test('generic cancellation and process crash recover without false completion', async t => {
   const { c, project, stderr } = await setup(t,'slow');
   await c.command('session.turn',{objective:'Slow synthetic model response'});
+  await fileAppears(join(project,'model-started'));
   await c.command('session.cancel'); await until(c,()=>terminal(c),stderr); assert.equal(terminal(c),'cancelled');
   await new Promise(resolve => setTimeout(resolve, 2200));
   await assert.rejects(access(join(project,'model-completed')));
@@ -122,4 +124,53 @@ test('durable state rejects another project binding and recovers with original p
   c.args[index]=other; await assert.rejects(c.connect()); assert.equal(c.ready,false);
   c.args[index]=project; await c.connect(); await until(c,()=>c.ready);
   assert.equal(c.view.sessionId,session);
+});
+test('installed CLI default generic host loads trusted local config and reads actual workspace', async t => {
+  const temp=await mkdtemp(join(tmpdir(),'agentprolog-installed-'));
+  t.after(()=>rm(temp,{recursive:true,force:true}));
+  const project=join(temp,'project'); await mkdir(join(project,'.agentprolog'),{recursive:true});
+  await writeFile(join(project,'input.txt'),'READ_MARKER: installed CLI synthetic input\n');
+  await writeFile(join(project,'.agentprolog/config.pl'),`:- module(test_installed_profile,[agentprolog_config/1]).\n:- use_module(${quote(support)}).\nagentprolog_config(C) :- configuration(${quote(project)},read,C).\n`);
+  const install=join(temp,'install');
+  execFileSync('npm',['install','--ignore-scripts','--no-audit','--no-fund','--prefix',install,join(repo,'packages/conversation-ui')],{encoding:'utf8'});
+  const launcher=join(temp,'host');
+  const shellQuote=value=>`'${value.replaceAll("'","'\\''")}'`;
+  const swipl=process.env.SWIPL ?? 'swipl';
+  await writeFile(launcher,`#!/bin/sh\nexec ${shellQuote(swipl)} -q -p ${shellQuote(`library=${runtime}/prolog`)} -s ${shellQuote(join(repo,'prolog/agentprolog_session.pl'))} -- "$@"\n`);
+  await chmod(launcher,0o700);
+  const args=['--project',project,'--state',join(temp,'state'),'--trust-project',
+    ...['workspace_read','workspace_create','workspace_modify','workspace_write'].flatMap(name=>['--allow-tool',name]),'--allow-context','peek'];
+  const child=spawn(join(install,'node_modules/.bin/agentProlog'),args,{cwd:project,
+    env:{...process.env,AGENTPROLOG_SESSION:launcher,AGENTPROLOG_SIDECAR:''},stdio:['pipe','pipe','pipe']});
+  t.after(()=>{if(child.exitCode===null)child.kill('SIGKILL');});
+  let output='',stderr='',submitted=false,quitting=false;
+  child.stderr.on('data',data=>stderr+=data);
+  child.stdout.on('data',data=>{
+    output+=data;
+    if(!submitted && output.includes('Connection: connected')) {
+      submitted=true; child.stdin.write('Read the harmless synthetic input file\n');
+    }
+    if(!quitting && output.includes('Run outcome: complete') && output.includes('Observed actual fixture input: READ_MARKER')) {
+      quitting=true; child.stdin.end('/inspect\n/quit\n');
+    }
+  });
+  const timer=setTimeout(()=>child.kill('SIGKILL'),15000);
+  const [code]=await once(child,'exit');clearTimeout(timer);
+  assert.equal(code,0,`${stderr}\n${output}`); assert.equal(quitting,true);
+  assert.match(output,/workspace_read/);assert.match(output,/installed CLI synthetic input/);
+  assert.ok((output.match(/Run outcome: complete/g)??[]).length>=2,'/inspect must render the canonical completed view');
+  console.log('Installed CLI native interaction: objective → workspace_read → context_peek → answer → /inspect → /quit');
+});
+
+async function fileAppears(path) {
+  for(let i=0;i<500;i++) { try { await access(path); return; } catch { await new Promise(r=>setTimeout(r,10)); } }
+  assert.fail(`Native fixture did not enter active model handler: ${path}`);
+}
+test('cancel immediately after admission prevents later model completion', async t => {
+  const { c, project, stderr } = await setup(t,'slow');
+  await c.command('session.turn',{objective:'Cancel this synthetic run immediately'});
+  await c.command('session.cancel'); await until(c,()=>terminal(c),stderr);
+  assert.equal(terminal(c),'cancelled');
+  await new Promise(resolve=>setTimeout(resolve,2200));
+  await assert.rejects(access(join(project,'model-completed')));
 });
