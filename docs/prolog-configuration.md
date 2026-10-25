@@ -8,6 +8,12 @@ research prompts, collection adapters or domain schemas.
 The model, tool invocation, capability/authority checks, budgets and cancellation
 remain in Prolog-RLM. A plugin is not an alternative agent loop.
 
+The installed session host exposes AgentProlog's modules on the Prolog library
+path. Trusted plugins can import `library(agentprolog_workspace_tools)` to
+register generic workspace tools without referring to a checkout path.
+The host owns a durable native effect store in its session state directory;
+opening that store grants no tool capabilities or approval authority.
+
 ## Trust and loading
 
 Prolog configuration is executable code. It can execute directives while loading

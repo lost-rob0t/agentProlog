@@ -70,9 +70,10 @@ stripped before display.
 ## Contracts and pins
 
 The protocol remains `prolog_agent_ui_v1`. Runtime pin
-`086cf8bfa66dd58e5c8aa20ad5716b6bc67712a7` has byte-identical canonical protocol,
-facade and protocol documentation to the prior `fa03bb5…` pin. The generic
-native host consumes those public runtime APIs.
+`de9f4b3126f1dbd776ec2272b5cc63bc85260a14` is the coordinated integration
+candidate containing snapshot/schema validation, supported MCP execution APIs
+and the Z.AI coding provider. The generic native host consumes public runtime
+APIs; protocol identity remains unchanged.
 
 Downstream integration tests use an explicitly pinned external synthetic
 harness fixture; no live research is enabled. The external harness must consume
@@ -89,7 +90,7 @@ malformed input and the executable CLI. Generic native host/config/tool tests
 are separate from downstream harness tests and from the final real-model gate.
 
 This work is **not production-ready yet**. Full generic mutation-approval
-continuation, installed Nix integration, final downstream report acceptance and
+continuation, final downstream report acceptance and
 a bounded real-model filesystem task must all pass. No model-provider credential
 was present in the implementation environment. The requested Z.AI subscription integration is proceeding with the upstream
 provider owner. Final acceptance needs existing authorized access and confirmed
@@ -103,8 +104,11 @@ retry at AgentProlog `071e17f…` fetched it successfully. Nix flake checks, def
 package build/smoke and all 40 native config/host/filesystem tests passed on
 GitHub. No credentials or visibility settings were changed by this work.
 
-Full generic E2E still exposed native mutation-continuation failures and an
-immediate-cancellation race on SWI 9.0.4. Those gates remain failures until fixed;
-active-handler cancellation and installed CLI interaction are separate tests.
+At implementation head `fd6b512…`, Nix CI, all 26 JavaScript tests, 40 native
+tests, four official fixture tests and installed CLI checks passed. Generic E2E
+passed 9/11 on both hosted and local SWI 9.0.4. Both cancellation tests passed
+after cleanup ordering was repaired; the two mutation-approval gates still fail.
+The newer coordinated runtime candidate is being checked separately and does
+not inherit those results automatically.
 See [manual real-model acceptance](real-model-acceptance.md) for the opt-in
 `ZAI_API_KEY` mapping, exact model, bounds and required final proof.

@@ -18,6 +18,7 @@
 :- use_module(library(rlm_direct)).
 :- use_module(library(rlm_completion), [rlm_completion/4, rlm_cancellation_token/1, rlm_cancel/1]).
 :- use_module(library(rlm_tool)).
+:- use_module(library(rlm_effect), [rlm_effect_store_open/1, rlm_effect_store_close/0]).
 :- use_module('./agentprolog_config').
 
 
@@ -43,8 +44,11 @@ cli_options(['--plugin',Path|R], [plugin(Path)|O]) :- cli_options(R,O).
 serve(Directory, Config) :-
     make_directory_path(Directory),
     directory_file_path(Directory, 'owner.lock', Lock),
+    directory_file_path(Directory, 'effects.db', Effects),
     setup_call_cleanup(open(Lock, write, LockStream, [lock(write), wait(false)]),
-        setup_call_cleanup(initialize(Directory, Config), loop, shutdown),
+        setup_call_cleanup(rlm_effect_store_open(Effects),
+            setup_call_cleanup(initialize(Directory, Config), loop, shutdown),
+            rlm_effect_store_close),
         close(LockStream)).
 
 initialize(Directory, Config) :-
@@ -288,7 +292,7 @@ safe_failure(_, _{status:"failed",reason:"native_execution_failed",code:"runtime
 safe_category(Dict,Key,Text) :-
     get_dict(Key,Dict,Value),
     memberchk(Value,[completion_fault,transport_error,provider_error,budget_exceeded,
-      cancelled,timeout,capability_error,invalid_request,runtime,completion,provider,
+      cancelled,timeout,capability_error,invalid_request,effect_store_required,approval_required,runtime,completion,provider,
       budget,tool,context,plan,validation,authority,native_result]), !,
     atom_string(Value,Text).
 safe_category(_,_,"unknown").

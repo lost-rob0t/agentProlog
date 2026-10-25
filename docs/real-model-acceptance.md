@@ -31,9 +31,9 @@ must use the intended existing subscription credential type; an endpoint URL
 alone is not a guarantee of billing category. No new account, credential,
 purchase or persistent access grant is created by this test.
 
-The runtime constructor is currently being integrated upstream. The workflow
-checks that the pinned runtime exports it before the credential-bearing step.
-Until the coordinated provider pin and native approval continuation are ready,
+The coordinated runtime candidate exports the constructor. The workflow also
+checks that export before the credential-bearing step.
+Until native approval continuation is ready,
 this gate cannot establish final acceptance. No real-model run has passed yet.
 
 The task runs in a newly created temporary workspace containing only a synthetic

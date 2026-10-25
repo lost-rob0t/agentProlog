@@ -5,9 +5,9 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     prolog-rlm = {
-      # Coordinated native session pin. Canonical UI v1 files are byte-identical
-      # to the previous pin; execution remains in the reusable upstream runtime.
-      url = "github:lost-rob0t/prolog-rlm/086cf8bfa66dd58e5c8aa20ad5716b6bc67712a7";
+      # Coordinated integration candidate: canonical UI v1, validated snapshots,
+      # supported MCP execution APIs and the upstream Z.AI coding provider.
+      url = "github:lost-rob0t/prolog-rlm/de9f4b3126f1dbd776ec2272b5cc63bc85260a14";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -22,7 +22,7 @@
           name = "agentprolog-session";
           runtimeInputs = [ upstream ];
           text = ''
-            exec ${upstreamSwipl} -q -s ${./prolog}/agentprolog_session.pl -- "$@"
+            exec ${upstreamSwipl} -q -p library=${./prolog} -s ${./prolog}/agentprolog_session.pl -- "$@"
           '';
         };
         agentProlog = pkgs.writeShellApplication {

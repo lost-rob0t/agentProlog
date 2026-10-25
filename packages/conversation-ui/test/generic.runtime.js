@@ -43,7 +43,8 @@ async function setup(t, scenario, projectLocal = false) {
   return { c, project, state, stderr: () => stderr };
 }
 test('generic native tool reads actual file and model inspects opaque result context', async t => {
-  const { c, stderr } = await setup(t,'read');
+  const { c, stderr, state } = await setup(t,'read');
+  await access(join(state,'effects.db'));
   await c.command('session.turn',{objective:'Read the harmless synthetic file'});
   await until(c,()=>terminal(c),stderr); assert.equal(terminal(c),'complete',render(c.view));
   assert.match(render(c.view),/READ_MARKER/);
@@ -118,11 +119,13 @@ test('trusted project-local config supports canonical question, answer, select a
   assert.notEqual(c.view.state.run.run_id,run); assert.match(render(c.view),/Synthetic hello/);
 });
 test('durable state rejects another project binding and recovers with original project', async t => {
-  const { c, project, state } = await setup(t,'hello'); const session=c.view.sessionId;
+  const { c, project, state, stderr } = await setup(t,'hello'); const session=c.view.sessionId;
   await c.close(); const other=join(project,'other-project'); await mkdir(other);
   const index=c.args.indexOf(state)+1; assert.equal(c.args[index],project);
   c.args[index]=other; await assert.rejects(c.connect()); assert.equal(c.ready,false);
-  c.args[index]=project; await c.connect(); await until(c,()=>c.ready);
+  c.args[index]=project;
+  try { await c.connect(); await until(c,()=>c.ready); }
+  catch(error) { throw new Error(`${error.message}\n${stderr()}`,{cause:error}); }
   assert.equal(c.view.sessionId,session);
 });
 test('installed CLI default generic host loads trusted local config and reads actual workspace', async t => {
