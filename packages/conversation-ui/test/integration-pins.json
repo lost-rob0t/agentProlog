@@ -5,7 +5,7 @@
   },
   "downstream": {
     "repository": "lost-rob0t/starintel-gpt-auto-dig",
-    "commit": "24b5c69127f2bd29ba3f7226d82f0b39572ad669"
+    "commit": "a91704d859df3a0849d45978cca8e5856beabcd8"
   },
   "downstream_schema_runtime": {
     "repository": "lost-rob0t/starintel-doc",
