@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { Client } from '../src/client.js';
+import { verifyLiveProof, INPUT } from './live-proof.js';
 
 if (process.env.AGENTPROLOG_LIVE_ACCEPTANCE !== '1' || !process.env.ZAI_API_KEY) {
   throw new Error('Live acceptance requires explicit opt-in and existing ZAI_API_KEY. No model call made.');
@@ -15,7 +16,7 @@ const directory = await mkdtemp(join(tmpdir(), 'agentprolog-live-'));
 const workspace = join(directory, 'workspace');
 const { mkdir } = await import('node:fs/promises');
 await mkdir(workspace);
-await writeFile(join(workspace, 'input.txt'), 'Synthetic task marker: ALPHA\n');
+await writeFile(join(workspace, 'input.txt'), INPUT);
 const client = new Client({ command: process.env.SWIPL ?? 'swipl', args: ['-q', '-p', `library=${runtime}/prolog`,
   '-s', resolve('test/support/live_workspace_profile.pl'), '--', join(directory, 'state'), workspace] });
 const start = Date.now(); let timer, fault;
@@ -52,13 +53,12 @@ try {
     timer = setTimeout(() => reject(new Error('Live acceptance exceeded 150-second outer limit')), 150000);
     client.on('view', check); void check();
   });
-  assert.equal(await readFile(join(workspace, 'result.txt'), 'utf8'), 'GAMMA');
-  for (const name of ['workspace_read', 'workspace_create', 'workspace_modify', 'workspace_write']) {
-    assert.ok(client.view.state.tools.some(t => t.name === name && t.status === 'finished'), `Missing actual tool result: ${name}`);
-  }
-  const route = client.view.state.traces.find(t => t.kind === 'provider_route');
+  const { readdir } = await import('node:fs/promises');
+  const files = Object.fromEntries(await Promise.all((await readdir(workspace)).map(async name =>
+    [name, await readFile(join(workspace,name),'utf8')])));
+  const route = verifyLiveProof(client.view.state,files);
   const evidence = { status: 'passed', configured_provider: 'zai_coding', requested_model: 'glm-5.3-flash',
-    actual_provider: route?.provider ?? null, selected_model: route?.selected_model ?? null,
+    actual_provider: route.provider, selected_model: route.selected_model,
     agent_commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     runtime_commit: execFileSync('git', ['-C', runtime, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     elapsed_ms: Date.now() - start, usage: Object.fromEntries(Object.entries(client.view.state.usage)
