@@ -112,3 +112,11 @@ The newer coordinated runtime candidate is being checked separately and does
 not inherit those results automatically.
 See [manual real-model acceptance](real-model-acceptance.md) for the opt-in
 `ZAI_API_KEY` mapping, exact model, bounds and required final proof.
+
+Downstream synthetic integration against Auto-Dig
+`9aa52295ef42b011459e541a649b04e3279a7d58` and runtime
+`de9f4b3126f1dbd776ec2272b5cc63bc85260a14` passed all five tests locally on
+SWI 9.0.4: typed fixture tool/report/approval, denial, durable reconnect and stale
+decisions, cancellation/crash recovery, questions and budget/error handling.
+The report remained a canonical draft with `published:false`. This is mock model
+I/O with actual native tools and processes, separate from real-model acceptance.
