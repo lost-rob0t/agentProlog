@@ -93,3 +93,12 @@ The repository consumes `prolog-rlm` through its Nix flake dependency.
 - AgentProlog product epic: issue #1
 - DSH AgentFactory implementation: issue #7 / PR #8
 - upstream repository boundary: `lost-rob0t/prolog-rlm#141`
+
+## Canonical terminal client (integration in progress)
+
+`nix run .#conversation -- --sidecar /absolute/path/to/sidecar` opens the generic
+canonical session UI. It renders Prolog-owned conversation state and supports
+inspection, approvals, questions, cancellation and reconnect. External harnesses
+own profiles, tools and workflows. Session/turn integration is pending the
+coordinated backend contract; this is not yet a complete research product.
+See [client usage and validation limits](docs/canonical-conversation-ui.md).

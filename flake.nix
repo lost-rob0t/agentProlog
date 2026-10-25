@@ -26,6 +26,13 @@
             exec ${upstreamSwipl} -q -g "use_module(library(rlm)),writeln('AgentProlog runtime ready'),halt" -- "$@"
           '';
         };
+        conversationUi = pkgs.writeShellApplication {
+          name = "agentprolog-conversation";
+          runtimeInputs = [ pkgs.nodejs_22 ];
+          text = ''
+            exec ${pkgs.nodejs_22}/bin/node ${./packages/conversation-ui/src}/cli.js "$@"
+          '';
+        };
         agentPrologZaraRuntime = pkgs.writeShellApplication {
           name = "agentprolog-zara-runtime";
           runtimeInputs = [ upstream ];
@@ -37,14 +44,23 @@
         packages.agentProlog = agentProlog;
         packages.agentProlog-zara-runtime = agentPrologZaraRuntime;
         packages.default = agentProlog;
+        packages.conversation-ui = conversationUi;
 
         apps.agentProlog = flake-utils.lib.mkApp { drv = agentProlog; };
         apps.zara-runtime = flake-utils.lib.mkApp { drv = agentPrologZaraRuntime; };
         apps.default = self.apps.${system}.agentProlog;
+        apps.conversation = flake-utils.lib.mkApp { drv = conversationUi; };
 
         devShells.default = pkgs.mkShell {
           packages = [ upstream ];
         };
+
+        checks.conversation-cli = pkgs.runCommand "agentprolog-conversation-cli" {
+          nativeBuildInputs = [ conversationUi ];
+        } ''
+          agentprolog-conversation --help | grep -F "canonical conversation UI"
+          touch "$out"
+        '';
 
         checks.runtime-load = pkgs.runCommand "agentprolog-runtime-load" {
           nativeBuildInputs = [ upstream ];

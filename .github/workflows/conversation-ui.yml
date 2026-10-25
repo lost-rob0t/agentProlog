@@ -1,0 +1,52 @@
+name: Canonical conversation UI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  projection:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+      - name: Projection, correlation and generic product boundary
+        run: npm test --prefix packages/conversation-ui
+      - name: Installed CLI smoke
+        run: |
+          npm install --prefix "$RUNNER_TEMP/agentprolog-install" ./packages/conversation-ui
+          "$RUNNER_TEMP/agentprolog-install/node_modules/.bin/agentProlog" --help | grep -F "canonical conversation UI"
+  official-native-fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read existing exact runtime dependency
+        id: runtime
+        run: |
+          rev=$(sed -n 's/.*github:lost-rob0t\/prolog-rlm\/\([0-9a-f]\{40\}\).*/\1/p' flake.nix)
+          test "${#rev}" -eq 40
+          echo "rev=$rev" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: lost-rob0t/prolog-rlm
+          ref: ${{ steps.runtime.outputs.rev }}
+          path: .runtime
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+      - name: Install native SWI-Prolog
+        run: sudo apt-get update && sudo apt-get install -y swi-prolog-nox
+      - name: Official fixture process and executable CLI evidence
+        env:
+          PROLOG_RLM_SOURCE: ${{ github.workspace }}/.runtime
+        run: |
+          set -o pipefail
+          npm run test:runtime --prefix packages/conversation-ui 2>&1 | tee native-fixture-evidence.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: canonical-native-fixture-evidence
+          path: native-fixture-evidence.txt
