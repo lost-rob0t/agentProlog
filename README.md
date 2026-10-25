@@ -1,6 +1,6 @@
 # AgentProlog
 
-AgentProlog is the standalone coding-agent product built on [`lost-rob0t/prolog-rlm`](https://github.com/lost-rob0t/prolog-rlm).
+AgentProlog is the reusable generic agent application built on [`lost-rob0t/prolog-rlm`](https://github.com/lost-rob0t/prolog-rlm).
 
 The repository owns product composition and UX. `prolog-rlm` remains the reusable SWI-Prolog runtime/library.
 
@@ -93,3 +93,19 @@ The repository consumes `prolog-rlm` through its Nix flake dependency.
 - AgentProlog product epic: issue #1
 - DSH AgentFactory implementation: issue #7 / PR #8
 - upstream repository boundary: `lost-rob0t/prolog-rlm#141`
+
+## Generic native agent and terminal application
+
+```sh
+nix run . -- --project /absolute/project --state /absolute/private/session-state
+```
+
+The default application opens an interactive canonical session. Type a task;
+inspect tools, usage and artifacts; answer questions; decide approvals; cancel or
+reconnect. Prolog-RLM owns execution. Trusted plugins and explicit project-local
+Prolog configuration provide tools/profiles; downstream harnesses own their
+business logic. See [application and validation status](docs/canonical-conversation-ui.md)
+and [Prolog configuration](docs/prolog-configuration.md).
+
+This draft is not production-ready: hosted dependency access, complete native
+mutation-approval continuation and final real-model acceptance remain gates.

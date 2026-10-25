@@ -1,0 +1,64 @@
+name: Manual real-model agent acceptance
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_commit:
+        description: 'Exact AgentProlog commit reviewed for this credential-bearing run'
+        required: true
+        type: string
+      authorized_subscription:
+        description: 'Confirm this is existing authorized Z.AI subscription access with sufficient quota (no unapproved pay-as-you-go spend)'
+        required: true
+        default: false
+        type: boolean
+permissions:
+  contents: read
+jobs:
+  real-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Require explicit reviewed commit and existing subscription authorization
+        env:
+          REVIEWED_COMMIT: ${{ inputs.reviewed_commit }}
+          AUTHORIZED_SUBSCRIPTION: ${{ inputs.authorized_subscription }}
+        run: |
+          test "$AUTHORIZED_SUBSCRIPTION" = true
+          test "$REVIEWED_COMMIT" = "$GITHUB_SHA"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+      - name: Resolve reviewed runtime pin
+        id: runtime
+        run: |
+          rev=$(sed -n 's/.*github:lost-rob0t\/prolog-rlm\/\([0-9a-f]\{40\}\).*/\1/p' flake.nix)
+          test "${#rev}" -eq 40
+          echo "rev=$rev" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: lost-rob0t/prolog-rlm
+          ref: ${{ steps.runtime.outputs.rev }}
+          path: .runtime
+      - name: Install runtime dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y swi-prolog-nox
+      - name: Require coordinated Z.AI provider support before exposing credentials
+        run: |
+          if ! swipl -q -p library="$GITHUB_WORKSPACE/.runtime/prolog" -g "use_module(library(rlm_chain)),current_predicate(rlm_chain:zai_coding_provider/3),halt"; then
+            echo '::error::The pinned runtime does not yet provide the coordinated Z.AI Coding Plan adapter.'
+            exit 1
+          fi
+      - name: Bounded synthetic filesystem task with actual model I/O
+        working-directory: packages/conversation-ui
+        env:
+          AGENTPROLOG_LIVE_ACCEPTANCE: '1'
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          PROLOG_RLM_SOURCE: ${{ github.workspace }}/.runtime
+        run: |
+          set -o pipefail
+          node test/live-acceptance.js | tee live-acceptance-evidence.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-model-acceptance-evidence
+          path: packages/conversation-ui/live-acceptance-evidence.json

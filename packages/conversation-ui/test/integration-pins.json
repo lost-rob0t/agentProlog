@@ -1,0 +1,14 @@
+{
+  "runtime": {
+    "repository": "lost-rob0t/prolog-rlm",
+    "commit": "4716ba8aa0bbf3fa1b96d80e8ed8e91d99973c85"
+  },
+  "downstream": {
+    "repository": "lost-rob0t/starintel-gpt-auto-dig",
+    "commit": "9aa52295ef42b011459e541a649b04e3279a7d58"
+  },
+  "downstream_schema_runtime": {
+    "repository": "lost-rob0t/starintel-doc",
+    "commit": "ac015a5d92a1d9587e5dc7764dd9e0a150a6d0a8"
+  }
+}
