@@ -19,4 +19,4 @@ jobs:
       - name: Build default package
         run: nix build .#agentProlog --print-build-logs
       - name: Run default app
-        run: nix run .#agentProlog | grep -F 'AgentProlog runtime ready'
+        run: nix run .#agentProlog -- --help | grep -F 'canonical conversation UI'

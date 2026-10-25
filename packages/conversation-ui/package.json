@@ -3,10 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "bin": { "agentProlog": "src/cli.js" },
+  "bin": {
+    "agentProlog": "src/cli.js"
+  },
   "scripts": {
     "test": "node --test test/*.test.js",
-    "test:runtime": "node --test test/*.runtime.js"
+    "test:runtime": "node --test test/native.runtime.js",
+    "test:downstream": "node --test test/downstream.runtime.js",
+    "test:generic": "node --test test/generic.runtime.js"
   },
-  "engines": { "node": ">=22" }
+  "engines": {
+    "node": ">=22"
+  }
 }

@@ -44,3 +44,21 @@ test('missing executable rejects connect and close does not hang', async () => {
   await assert.rejects(c.connect(), { code: 'ENOENT' });
   await c.close(); assert.equal(c.connected, false);
 });
+test('required capabilities must be confirmed by negotiated runtime data', async t => {
+  const c = client(t); c.requiredCapabilities = ['approvals'];
+  const p = c.request({ kind: 'negotiate' }); const request_id = [...c.pending.keys()][0];
+  const reply = { protocol: PROTOCOL, kind: 'result', session_id: 's', request_id, status: 'ok', payload: { capabilities: ['usage'] } };
+  assert.throws(() => c.receive(reply), { code: 'required_capability_missing' });
+  assert.equal(c.negotiated, undefined);
+  c.receive({ ...reply, payload: { capabilities: ['approvals'] } });
+  await p; assert.equal(c.negotiated, true);
+});
+test('synchronous pipe write failure rejects and clears pending mutation', async t => {
+  const c = client(t); c.child.stdin.write = () => { throw new Error('broken write'); };
+  await assert.rejects(c.request({ kind: 'command', session_id: 's' }), /broken write/);
+  assert.equal(c.pending.size, 0); assert.equal(c.connected, false);
+});
+test('unsolicited canonical errors retain structured runtime failure', t => {
+  const c = client(t);
+  assert.throws(() => c.receive({ protocol: PROTOCOL, kind: 'error', session_id: 's', code: 'runtime_failed', message: 'Runtime failed', details: {} }), { code: 'runtime_failed' });
+});

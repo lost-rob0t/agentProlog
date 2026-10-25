@@ -39,6 +39,16 @@ jobs:
           node-version: '22.19.0'
       - name: Install native SWI-Prolog
         run: sudo apt-get update && sudo apt-get install -y swi-prolog-nox
+      - name: Generic configuration, session and real workspace tools
+        run: |
+          swipl -q -p library="$GITHUB_WORKSPACE/.runtime/prolog" \
+            -s test/agentprolog_config_test.pl \
+            -s test/agentprolog_session_test.pl \
+            -s test/agentprolog_workspace_tools_test.pl -g "run_tests,halt"
+      - name: Generic agent through the canonical JS client
+        env:
+          PROLOG_RLM_SOURCE: ${{ github.workspace }}/.runtime
+        run: npm run test:generic --prefix packages/conversation-ui
       - name: Official fixture process and executable CLI evidence
         env:
           PROLOG_RLM_SOURCE: ${{ github.workspace }}/.runtime

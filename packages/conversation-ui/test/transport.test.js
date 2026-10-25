@@ -25,3 +25,17 @@ test('shutdown escalates when child ignores SIGTERM', async () => {
   await c.connect(); const child = c.child; await c.close();
   assert.equal(child.signalCode, 'SIGKILL');
 });
+test('concurrent connect callers share one child and close supersedes pending startup', async () => {
+  const c = new Client({ command: process.execPath, args: [fixture, 'duplicate'] });
+  const a = c.connect(), b = c.connect(); assert.equal(a, b);
+  await a; const child = c.child; await c.close(); assert.notEqual(child.signalCode, null);
+  const pending = c.connect(); await c.close();
+  await assert.rejects(pending, { code: 'connection_superseded' });
+  assert.equal(c.child, null); assert.equal(c.connected, false);
+});
+test('negotiation without canonical snapshot times out and terminates child', async t => {
+  const script = `require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const f=JSON.parse(line);console.log(JSON.stringify({protocol:f.protocol,kind:'result',session_id:'s',request_id:f.request_id,status:'ok',payload:{}}));});`;
+  const c = new Client({ command: process.execPath, args: ['-e', script], timeoutMs: 200 });
+  t.after(() => c.close()); const fault = once(c, 'fault'); await c.connect();
+  const [error] = await fault; assert.equal(error.code, 'snapshot_timeout'); assert.equal(c.ready, false);
+});

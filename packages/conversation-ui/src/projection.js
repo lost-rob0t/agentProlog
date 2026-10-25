@@ -4,6 +4,10 @@ export const PROTOCOL = 'prolog_agent_ui_v1';
 export const MAX_BYTES = 1024 * 1024;
 const lists = ['messages', 'tools', 'approvals', 'questions', 'subagents',
   'verification', 'traces', 'indeterminate_effects', 'extensions'];
+const eventTypes = new Set(['run_started', 'run_finished', 'message_started', 'text_delta',
+  'message_completed', 'tool_started', 'tool_output', 'tool_finished', 'approval_required',
+  'approval_resolved', 'question_required', 'question_answered', 'subagent_started',
+  'subagent_finished', 'usage', 'verification', 'trace', 'effect_indeterminate']);
 export class ProtocolError extends Error {
   constructor(code, message = code) { super(message); this.code = code; }
 }
@@ -43,9 +47,9 @@ function upsert(state, field, item) {
   if (i < 0) state[field].push(item); else state[field][i] = item;
 }
 function update(state, field, key, fields) {
-  const item = state[field].find(row => row.id === key);
-  requireValue(item, 'replay_missing_entity');
-  Object.assign(item, fields);
+  const index = state[field].findIndex(row => row.id === key);
+  requireValue(index >= 0, 'replay_missing_entity');
+  state[field][index] = { ...state[field][index], ...fields };
 }
 function append(state, field, item) { state[field] = [...state[field], item].slice(-256); }
 export class Projection {
@@ -61,12 +65,16 @@ export class Projection {
   }
   event(frame) {
     validateEnvelope(frame);
-    requireValue(frame.kind === 'event' && id(frame.event_id) && object(frame.payload), 'invalid_event');
+    requireValue(frame.kind === 'event' && id(frame.event_id) && id(frame.event_type) && object(frame.payload), 'invalid_event');
+    requireValue(frame.caused_by === undefined || id(frame.caused_by), 'invalid_correlation');
+    if (!eventTypes.has(frame.event_type)) {
+      requireValue(object(frame.extension) && id(frame.extension.namespace) && frame.extension.required === false, 'unsupported_extension');
+    }
     requireValue(this.state && frame.session_id === this.sessionId, 'session_mismatch');
     requireValue(Number.isSafeInteger(frame.seq) && frame.seq > 0, 'invalid_sequence');
     if (frame.seq <= this.cursor) return false;
     requireValue(frame.seq === this.cursor + 1, 'sequence_gap');
-    const s = structuredClone(this.state), p = frame.payload;
+    const s = structuredClone(this.state), p = structuredClone(frame.payload);
     const key = name => { requireValue(id(p[name]), `invalid_${name}`); return p[name]; };
     const field = name => { requireValue(Object.hasOwn(p, name), `missing_${name}`); return p[name]; };
     switch (frame.event_type) {

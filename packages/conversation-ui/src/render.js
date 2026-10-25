@@ -9,8 +9,8 @@ export function render(view, connected = true) {
   const s = view.state;
   const lines = [`AgentProlog | ${safe(view.sessionId)} | cursor ${view.cursor}`, 
     `Connection: ${connected ? 'connected' : 'DISCONNECTED — displayed state is stale'}`,
-    `Run: ${safe(s.status)} ${json(s.run)}`,
-    'A finished chat turn does not establish publication or investigation completion.'];
+    `Run outcome: ${safe(s.run?.outcome?.status ?? 'not terminal')} | stream: ${safe(s.status)}\n${json(s.run)}`,
+    'A finished chat turn does not establish external workflow completion or publication.'];
   for (const m of s.messages) lines.push(`\n${safe(m.role)} [${safe(m.status)}]\n${safe(m.text)}`);
   for (const [label, key] of [['Tools', 'tools'], ['Approvals', 'approvals'], ['Questions', 'questions'],
     ['Subagents', 'subagents'], ['Verification', 'verification'], ['Uncertain effects', 'indeterminate_effects'],

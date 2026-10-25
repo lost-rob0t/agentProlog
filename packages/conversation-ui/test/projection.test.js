@@ -13,7 +13,7 @@ test('canonical golden: all event types, generic tools, usage, uncertain effects
   assert.equal(p.state.questions[0].status, 'answered');
   assert.equal(p.state.usage.output_tokens, 340);
   assert.equal(p.state.indeterminate_effects.length, 1);
-  assert.match(render(p), /does not establish publication/);
+  assert.match(render(p), /does not establish external workflow completion/);
 });
 test('replay duplicates ignored; gaps and foreign sessions fail atomically', () => {
   const p = initial(); p.event(frames[1]);
@@ -49,4 +49,19 @@ test('product UI boundary: no research tools, provider SDKs or runtime execution
   const source = readdirSync(root).filter(f => f.endsWith('.js')).map(f => readFileSync(new URL(f, root), 'utf8')).join('\n');
   assert.doesNotMatch(source, /(?:openrouter|openai|anthropic|playwright|puppeteer|scrapy|osint|autodig|fetch\(|execSync\(|shell:\s*true)/i);
   assert.equal(PROTOCOL, 'prolog_agent_ui_v1');
+});
+test('event payload ownership is isolated from the wire object', () => {
+  const p = initial(), frame = structuredClone(frames[1]); p.event(frame);
+  frame.payload.task = 'caller mutation'; assert.notEqual(p.state.run.task, 'caller mutation');
+});
+test('malformed event type and causal identifier do not advance cursor', () => {
+  const p = initial();
+  assert.throws(() => p.event({ ...frames[1], caused_by: {} }), { code: 'invalid_correlation' });
+  assert.throws(() => p.event({ ...frames[1], event_type: null }), { code: 'invalid_event' });
+  assert.equal(p.cursor, 0);
+});
+test('replayed frames still reject unsupported required semantics', () => {
+  const p = initial(); p.event(frames[1]);
+  assert.throws(() => p.event({ ...frames[1], event_type: 'future_authority', extension: { namespace: 'authority', required: true } }), { code: 'unsupported_extension' });
+  assert.equal(p.cursor, 1);
 });
