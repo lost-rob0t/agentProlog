@@ -207,17 +207,21 @@ start(Objective) :-
     assertz(active(Run, Future)).
 
 work(Run, Objective, done) :-
-    setup_call_cleanup(begin_work(Run),work_body(Run,Objective),end_work(Run)).
+    setup_call_cleanup(true,
+      (begin_work(Run) -> work_body(Run,Objective) ; true),
+      end_work(Run)).
 begin_work(Run) :-
     with_mutex(agentprolog_session,
       (checkpoint(S), S.run_id == Run, S.phase == "running",
        retractall(worker_state(Run,_)),assertz(worker_state(Run,running)))).
 end_work(Run) :-
     with_mutex(agentprolog_session,
-      (retractall(worker_state(Run,_)),assertz(worker_state(Run,finished)),
+      (release_run_state(Run),
        checkpoint(S),
        (S.run_id == Run, S.phase == "cancelling"
         -> finish(_{status:"cancelled",cleanup_confirmed:true}) ; true))).
+release_run_state(Run) :-
+    retractall(worker_state(Run,_)), retractall(run_token(Run,_)).
 request_stop(Run) :-
     update(_{phase:"cancelling"}),
     event(agent_event(verification,"cancellation",_{status:"requested",cleanup_confirmed:false})),
@@ -226,7 +230,7 @@ request_stop(Run) :-
     (run_token(Run,Token) -> rlm_cancel(Token) ; true),
     (active(Run,Future) -> rlm_future_cancel(Future,_) ; true),
     (worker_state(Run,running) -> true
-     ; finish(_{status:"cancelled",cleanup_confirmed:true})).
+     ; finish(_{status:"cancelled",cleanup_confirmed:true}), release_run_state(Run)).
 work_body(Run,Objective) :-
     executor(Config),
     catch((native_execute(Config, Objective, Run, Outcome) -> true ; Outcome=error(failed)), _, Outcome=error(exception)),

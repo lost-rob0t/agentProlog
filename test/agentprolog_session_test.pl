@@ -16,6 +16,34 @@ test(native_model_io_without_tools) :-
     config(C), agentprolog_session:native_execute(C,"hello","test",Outcome),
     assertion(Outcome=ok(_)), Outcome=ok(Result), assertion(Result.value=="Synthetic hello").
 
+test(completed_run_releases_run_scoped_state) :-
+    tmp_file(agentprolog_session_cleanup,Directory),
+    setup_call_cleanup(make_directory(Directory),
+      ( config(C), agentprolog_session:initialize(Directory,C),
+        agentprolog_session:start("hello"),
+        agentprolog_session:checkpoint(S), Run=S.run_id,
+        agentprolog_session:active(Run,Future),
+        rlm_async:rlm_future_await(Future,_),
+        agentprolog_session:checkpoint(After), assertion(After.phase=="complete"),
+        assertion(\+ agentprolog_session:run_token(Run,_)),
+        assertion(\+ agentprolog_session:worker_state(Run,_)) ),
+      delete_directory_and_contents(Directory)).
+
+test(queued_cancel_releases_run_scoped_state) :-
+    tmp_file(agentprolog_session_queued_cancel,Directory),
+    setup_call_cleanup(make_directory(Directory),
+      ( config(C), agentprolog_session:initialize(Directory,C),
+        with_mutex(agentprolog_session,
+          ( agentprolog_session:start("hello"),
+            agentprolog_session:checkpoint(S), Run=S.run_id,
+            agentprolog_session:active(Run,Future),
+            agentprolog_session:request_stop(Run),
+            agentprolog_session:checkpoint(After), assertion(After.phase=="cancelled"),
+            assertion(\+ agentprolog_session:run_token(Run,_)),
+            assertion(\+ agentprolog_session:worker_state(Run,_)) )),
+        rlm_async:rlm_future_await(Future,_), agentprolog_session:reap_futures ),
+      delete_directory_and_contents(Directory)).
+
 test(checkpoint_restores_identity_and_interrupted_truth) :-
     tmp_file(agentprolog_session,Directory),
     setup_call_cleanup(make_directory(Directory),
