@@ -18,11 +18,12 @@
 :- use_module(library(rlm_direct)).
 :- use_module(library(rlm_completion), [rlm_completion/4, rlm_cancellation_token/1, rlm_cancel/1]).
 :- use_module(library(rlm_tool)).
-:- use_module(library(rlm_effect), [rlm_effect_store_open/1, rlm_effect_store_close/0]).
+:- use_module(library(rlm_effect), [rlm_effect_store_open/1, rlm_effect_store_close/0, rlm_effect_normalize/2]).
 :- use_module('./agentprolog_config').
 
 
-:- dynamic worker_state/2, run_token/2.
+:- dynamic worker_state/2, run_token/2, pending_native/4.
+:- use_module(library(rlm_authority), [rlm_approve/2, rlm_deny/3, rlm_pending_resolution_async/2]).
 :- dynamic checkpoint/1, state_directory/1, executor/1, active/2, negotiated/0.
 :- initialization(cli_main, main).
 cli_main :- current_prolog_flag(argv, Args), main(Args).
@@ -63,8 +64,9 @@ initialize(Directory, Config) :-
        (get_dict(config_binding,State,Binding) -> true ; throw(error(session_configuration_mismatch,_))),
        assertz(checkpoint(State)),
        snapshot(_),
-       ( memberchk(State.phase,["running","cancelling"])
-       -> finish(_{status:"interrupted", reason:"host_restart"})
+       ( (memberchk(State.phase,["running","cancelling"]);get_dict(native_pending,State,true))
+       -> (get_dict(native_pending,State,true) -> event(agent_event(approval_resolved,State.approval_id,"deny")) ; true),
+          finish(_{status:"interrupted", reason:"host_restart"})
        ; true )
     ; uuid_string(Session), uuid_string(Workspace),
       ui_v1_initial_view(Session, View),
@@ -77,7 +79,7 @@ initialize(Directory, Config) :-
 shutdown :-
     with_mutex(agentprolog_session,
       (retractall(negotiated), checkpoint(S),
-       (S.phase == "running" -> request_stop(S.run_id) ; true))),
+       (memberchk(S.phase,["running","awaiting_approval"]) -> request_stop(S.run_id) ; true))),
     forall(retract(active(_, Future)), catch(rlm_future_destroy(Future), _, true)).
 
 reap_futures :-
@@ -85,7 +87,7 @@ reap_futures :-
       (retract(active(Run,Future)),rlm_future_destroy(Future))).
 
 config_binding(Config, Hash) :-
-    copy_term(Config,Copy), numbervars(Copy,0,_), term_string(Copy,Text,[numbervars(true)]),
+    rlm_effect_normalize(Config,Copy), term_string(Copy,Text,[quoted(true),ignore_ops(true)]),
     (get_dict(sources,Config,Sources) -> maplist(source_hash,Sources,Hashes) ; Hashes=[]),
     term_string(binding(Text,Hashes),Binding), crypto_data_hash(Binding,HashAtom,[algorithm(sha256)]), atom_string(HashAtom,Hash).
 source_hash(Path, Hash) :- crypto_file_hash(Path,Hash,[algorithm(sha256)]).
@@ -154,10 +156,19 @@ execute_command(F, _{accepted:true}) :- F.command == "session.cancel", !,
     checkpoint(S),
     ( S.phase == "running"
     -> request_stop(S.run_id)
+    ; S.phase == "awaiting_approval", pending_native(S.run_id,_,_,_)
+    -> request_stop(S.run_id)
     ; S.phase == "awaiting_approval"
     -> event(agent_event(approval_resolved, S.approval_id, "deny")), finish(_{status:"cancelled"})
     ; S.phase == "awaiting_question" -> finish(_{status:"cancelled"})
     ; true ).
+execute_command(F, _{accepted:true}) :- F.command == "approval.decide",
+    checkpoint(S), pending_native(S.run_id,Id,_,Queue), !,
+    P=F.payload,
+    (S.phase == "awaiting_approval", P.approval_id == Id, memberchk(P.decision,["allow_once","deny"])
+     -> event(agent_event(approval_resolved,Id,P.decision)),
+        update(_{phase:"running",native_pending:false}), thread_send_message(Queue,decision(P.decision))
+     ; reject("invalid_approval")).
 execute_command(F, _{accepted:true, published:false}) :- F.command == "approval.decide", !,
     checkpoint(S), P = F.payload,
     ( S.phase == "awaiting_approval", P.approval_id == S.approval_id,
@@ -210,6 +221,8 @@ end_work(Run) :-
 request_stop(Run) :-
     update(_{phase:"cancelling"}),
     event(agent_event(verification,"cancellation",_{status:"requested",cleanup_confirmed:false})),
+    (pending_native(Run,Id,_,Queue)
+     -> event(agent_event(approval_resolved,Id,"deny")), thread_send_message(Queue,decision(cancel)) ; true),
     (run_token(Run,Token) -> rlm_cancel(Token) ; true),
     (active(Run,Future) -> rlm_future_cancel(Future,_) ; true),
     (worker_state(Run,running) -> true
@@ -230,14 +243,37 @@ native_execute(Config, Objective, Run, Outcome) :-
        append(Stream,Cancel,Controls),
        append(Controls,[tool_registry(Registry),capabilities(Config.capabilities),budget(Config.budget)|Config.runtime_options],Options),
        (get_dict(mode,Config,Mode) -> true ; Mode=direct),
-       native_mode(Mode,Objective,Options,Outcome)),
+       native_mode(Mode,Objective,Options,Initial), native_continuation(Run,Initial,Outcome)),
       tool_registry_destroy(Registry)).
 
 native_mode(direct,Objective,Options,Outcome) :- !,
-    rlm_direct_execute(Objective,text(Objective),Options,Outcome).
+    rlm_direct_execute(Objective,text(Objective),[suspend_on_approval(true)|Options],Outcome).
 native_mode(rlm,Objective,Options,Outcome) :- !,
     rlm_completion(Objective,text(Objective),Options,Outcome).
 native_mode(Mode,_,_,error(unsupported_mode(Mode))).
+
+% The native cursor retains execution state. The worker waits for the UI decision;
+% only the canonical authority resolves it, and native resume continues execution.
+native_continuation(Run,approval_required(Public),Outcome) :- !,
+    atom_string(Public.approval.id,ApprovalId),
+    setup_call_cleanup(message_queue_create(Queue),
+      setup_call_cleanup(
+        with_mutex(agentprolog_session,
+          (checkpoint(S), S.run_id == Run, S.phase == "running",
+           assertz(pending_native(Run,ApprovalId,Public.cursor,Queue)),
+           update(_{phase:"awaiting_approval",native_pending:true,approval_id:ApprovalId}),
+           event(agent_event(approval_required,ApprovalId,Run,Public.approval,["allow_once","deny"])))),
+        (thread_get_message(Queue,decision(Decision)),
+         (Decision == "allow_once"
+          -> setup_call_cleanup(rlm_pending_resolution_async(Public.approval.id,Resolution),
+                (rlm_approve(Public.approval.id,ok(_)),rlm_future_await(Resolution,_),
+                 rlm_direct_resume_execute(Public.cursor,Next)),rlm_future_destroy(Resolution))
+          ; Decision == "deny" -> rlm_deny(Public.approval.id,operator_denied,ok(_)), Next=rejected
+          ; Next=rejected)),
+        (retractall(pending_native(Run,_,_,_)),rlm_direct_cancel(Public.cursor,_))),
+      message_queue_destroy(Queue)),
+    native_continuation(Run,Next,Outcome).
+native_continuation(_,Outcome,Outcome).
 
 observed_binding(tool_handler(Preflight,Execute),Run,Name,
                  tool_handler(Preflight,agentprolog_session:observed_execute(Execute,Run,Name))) :- !.
@@ -258,7 +294,8 @@ session_event(Run, Event) :-
 complete(Run, Outcome) :-
     checkpoint(S),
     (S.run_id == Run, S.phase == "running"
-    -> (Outcome = ok(Result), get_dict(value, Result, Text), string(Text)
+    -> (Outcome == rejected -> finish(_{status:"rejected"})
+       ; Outcome = ok(Result), get_dict(value, Result, Text), string(Text)
        -> (member(M,S.view.messages), M.role == "assistant", M.text == Text -> true
           ; event(agent_event(message_started,Run,"assistant")),
           bounded_event(agent_event(model_delta,Run,Text), Delta), event(Delta),
@@ -307,7 +344,7 @@ complete_decision(Run, complete(Artifact)) :-
     finish(_{status:"complete",published:false}).
 
 finish(Outcome) :-
-    update(_{phase:Outcome.status}), event(agent_event(run_finished, Outcome)).
+    update(_{phase:Outcome.status,native_pending:false}), event(agent_event(run_finished, Outcome)).
 
 event(Canonical) :-
     checkpoint(S), Seq is S.view.at_seq + 1,

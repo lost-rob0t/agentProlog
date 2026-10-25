@@ -177,3 +177,15 @@ test('cancel immediately after admission prevents later model completion', async
   await new Promise(resolve=>setTimeout(resolve,2200));
   await assert.rejects(access(join(project,'model-completed')));
 });
+
+for (const mode of ['cancel','crash']) test(`native pending approval ${mode} never writes and reconnects honestly`, async t => {
+  const {c,project,stderr}=await setup(t,'write');
+  await c.command('session.turn',{objective:'Request bounded fixture creation'});
+  await until(c,()=>approval(c)||terminal(c),stderr); assert.ok(approval(c),render(c.view));
+  if(mode==='cancel') { await c.command('session.cancel'); await until(c,()=>terminal(c),stderr); }
+  else { const exited=once(c.child,'exit'); c.child.kill('SIGKILL'); await exited; }
+  await c.connect(); await until(c,()=>c.ready,stderr);
+  assert.equal(terminal(c),mode==='cancel'?'cancelled':'interrupted');
+  assert.equal(approval(c),undefined);
+  await assert.rejects(access(join(project,'created.txt')));
+});

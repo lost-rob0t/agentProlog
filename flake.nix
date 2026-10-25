@@ -7,7 +7,7 @@
     prolog-rlm = {
       # Coordinated integration candidate: canonical UI v1, validated snapshots,
       # supported MCP execution APIs and the upstream Z.AI coding provider.
-      url = "github:lost-rob0t/prolog-rlm/de9f4b3126f1dbd776ec2272b5cc63bc85260a14";
+      url = "github:lost-rob0t/prolog-rlm/4716ba8aa0bbf3fa1b96d80e8ed8e91d99973c85";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };

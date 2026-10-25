@@ -28,6 +28,12 @@ test(checkpoint_restores_identity_and_interrupted_truth) :-
        assertion(After.view.run.outcome.status=="interrupted")),
       delete_directory_and_contents(Directory)).
 
+test(binding_ignores_anonymous_dict_tag_sharing) :-
+    A=Tag{value:1}, B=Tag{value:2},
+    agentprolog_session:config_binding(_{a:A,b:B},First),
+    agentprolog_session:config_binding(_{a:_{value:1},b:_{value:2}},Second),
+    assertion(First==Second).
+
 test(configuration_change_rejected) :-
     tmp_file(agentprolog_binding,Directory),
     setup_call_cleanup(make_directory(Directory),

@@ -33,8 +33,9 @@ purchase or persistent access grant is created by this test.
 
 The coordinated runtime candidate exports the constructor. The workflow also
 checks that export before the credential-bearing step.
-Until native approval continuation is ready,
-this gate cannot establish final acceptance. No real-model run has passed yet.
+Native approval continuation is integrated and deterministic filesystem tests
+pass. Workflow registration and an actual model run remain required; no
+real-model run has passed yet.
 
 The task runs in a newly created temporary workspace containing only a synthetic
 input. The actual model must read it, create a file, modify it, overwrite it and

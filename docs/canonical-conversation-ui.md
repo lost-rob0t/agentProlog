@@ -120,3 +120,17 @@ SWI 9.0.4: typed fixture tool/report/approval, denial, durable reconnect and sta
 decisions, cancellation/crash recovery, questions and budget/error handling.
 The report remained a canonical draft with `published:false`. This is mock model
 I/O with actual native tools and processes, separate from real-model acceptance.
+
+## Native approval continuation integration
+
+Runtime `4716ba8aa0bbf3fa1b96d80e8ed8e91d99973c85` supplies native
+suspension and resume. The host retains the registry and effect store while
+waiting for a decision, resolves it through canonical authority, awaits the
+resolution and resumes the native cursor. It does not repeat model/tool calls
+to reconstruct execution. Cancellation releases the cursor; process restart
+marks suspended runs interrupted and invalidates their displayed approval.
+
+Both previously failing filesystem approval tests now pass unchanged. Local
+SWI 9.0.4 also passes cancel/crash while approval is pending, with no file write
+and honest reconnect outcomes. Backend `9aa52295…` integration remains 5/5.
+The final real-model acceptance requirement remains open.
