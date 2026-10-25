@@ -1,0 +1,23 @@
+name: Manual real-model agent acceptance
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_commit:
+        description: 'Exact AgentProlog commit reviewed for this credential-bearing run'
+        required: true
+        type: string
+      authorized_subscription:
+        description: 'Confirm existing authorized Z.AI subscription access with sufficient quota'
+        required: true
+        default: false
+        type: boolean
+permissions: {}
+jobs:
+  select-reviewed-product-branch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Require the separately reviewed product branch
+        run: |
+          echo '::error::This default-branch stub only registers manual dispatch. Select the reviewed product branch containing the actual acceptance workflow and provide its exact commit.'
+          exit 1
