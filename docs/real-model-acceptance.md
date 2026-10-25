@@ -50,10 +50,21 @@ The USD 0.10 runtime budget is an additional guard, not a guarantee that all
 providers supply billing data; the run requires existing authorized quota and
 must not initiate unapproved pay-as-you-go spending.
 
-Evidence contains the exact application/runtime commits, observed provider/model
-(null when runtime metadata is unavailable),
+Evidence contains the exact application/runtime commits and runtime provider/model
+evidence. The current gate requires matching metadata and fails when it is absent;
+static configuration is not proof of a request. Requested and selected model fields
+remain separate.
 latency, available numeric token/cost fields, approval count, tool names and
 verified final bytes. Raw provider diagnostics, prompts, response bodies and
 credentials are not uploaded. Absence of cost information must remain unknown,
 not be reported as zero. Local deterministic and hosted synthetic tests remain
 separate evidence and cannot replace this gate.
+
+The live proof validator requires exactly five successful workspace operations in
+order: read input.txt; create result.txt as ALPHA; modify it to BETA; write GAMMA;
+read result.txt back as GAMMA. Every operation must finish successfully, match its
+path, byte count and SHA-256; writes must match the expected normalized content
+and prior hashes. Actual input and final file bytes are asserted separately.
+Adversarial unit fixtures reject failed/merely finished tools, wrong order/model,
+missing readback, wrong paths and incorrect intermediate/final bytes. These unit
+fixtures do not execute or replace the opt-in real-provider profile.
