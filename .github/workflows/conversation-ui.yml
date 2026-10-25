@@ -21,6 +21,7 @@ jobs:
           "$RUNNER_TEMP/agentprolog-install/node_modules/.bin/agentProlog" --help | grep -F "canonical conversation UI"
   official-native-fixture:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Read existing exact runtime dependency
@@ -38,6 +39,7 @@ jobs:
         with:
           node-version: '22.19.0'
       - name: Install native SWI-Prolog
+        id: runtime_deps
         run: sudo apt-get update && sudo apt-get install -y swi-prolog-nox
       - name: Generic configuration, session and real workspace tools
         run: |
@@ -48,8 +50,11 @@ jobs:
       - name: Generic agent through the canonical JS client
         env:
           PROLOG_RLM_SOURCE: ${{ github.workspace }}/.runtime
-        run: npm run test:generic --prefix packages/conversation-ui
+        run: |
+          set -o pipefail
+          npm run test:generic --prefix packages/conversation-ui 2>&1 | tee generic-agent-evidence.txt
       - name: Official fixture process and executable CLI evidence
+        if: ${{ always() && steps.runtime_deps.outcome == 'success' }}
         env:
           PROLOG_RLM_SOURCE: ${{ github.workspace }}/.runtime
         run: |
@@ -59,4 +64,6 @@ jobs:
         if: always()
         with:
           name: canonical-native-fixture-evidence
-          path: native-fixture-evidence.txt
+          path: |
+            native-fixture-evidence.txt
+            generic-agent-evidence.txt

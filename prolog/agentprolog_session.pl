@@ -16,11 +16,12 @@
 :- use_module(library(prolog_agent_ui_v1)).
 :- use_module(library(prolog_agent_ui_facade)).
 :- use_module(library(rlm_direct)).
-:- use_module(library(rlm_completion), [rlm_completion/4]).
+:- use_module(library(rlm_completion), [rlm_completion/4, rlm_cancellation_token/1, rlm_cancel/1]).
 :- use_module(library(rlm_tool)).
 :- use_module('./agentprolog_config').
 
 
+:- dynamic worker_state/2, run_token/2.
 :- dynamic checkpoint/1, state_directory/1, executor/1, active/2, negotiated/0.
 :- initialization(cli_main, main).
 cli_main :- current_prolog_flag(argv, Args), main(Args).
@@ -47,6 +48,7 @@ serve(Directory, Config) :-
         close(LockStream)).
 
 initialize(Directory, Config) :-
+    retractall(worker_state(_,_)), retractall(run_token(_,_)),
     retractall(checkpoint(_)), retractall(state_directory(_)),
     retractall(executor(_)), retractall(active(_, _)), retractall(negotiated),
     assertz(state_directory(Directory)), assertz(executor(Config)),
@@ -57,7 +59,7 @@ initialize(Directory, Config) :-
        (get_dict(config_binding,State,Binding) -> true ; throw(error(session_configuration_mismatch,_))),
        assertz(checkpoint(State)),
        snapshot(_),
-       ( State.phase == "running"
+       ( memberchk(State.phase,["running","cancelling"])
        -> finish(_{status:"interrupted", reason:"host_restart"})
        ; true )
     ; uuid_string(Session), uuid_string(Workspace),
@@ -69,6 +71,9 @@ initialize(Directory, Config) :-
     ).
 
 shutdown :-
+    with_mutex(agentprolog_session,
+      (retractall(negotiated), checkpoint(S),
+       (S.phase == "running" -> request_stop(S.run_id) ; true))),
     forall(retract(active(_, Future)), catch(rlm_future_destroy(Future), _, true)).
 
 reap_futures :-
@@ -144,8 +149,7 @@ execute_command(F, _{accepted:true}) :- F.command == "session.resume", !,
 execute_command(F, _{accepted:true}) :- F.command == "session.cancel", !,
     checkpoint(S),
     ( S.phase == "running"
-    -> finish(_{status:"cancelled"}),
-       (active(_, Future) -> rlm_future_cancel(Future, _) ; true)
+    -> request_stop(S.run_id)
     ; S.phase == "awaiting_approval"
     -> event(agent_event(approval_resolved, S.approval_id, "deny")), finish(_{status:"cancelled"})
     ; S.phase == "awaiting_question" -> finish(_{status:"cancelled"})
@@ -171,7 +175,7 @@ execute_command(_, _) :- reject("unsupported_command").
 
 reject(Code) :- throw(error(command(Code), _)).
 ensure_inactive :- checkpoint(S),
-    ( memberchk(S.phase, ["running", "awaiting_approval", "awaiting_question"])
+    ( memberchk(S.phase, ["running", "cancelling", "awaiting_approval", "awaiting_question"])
     -> reject("session_busy") ; true ).
 
 start(Objective) :-
@@ -182,10 +186,31 @@ start(Objective) :-
     update(_{phase:"running", run_id:Run, objective:Objective, candidate:"", approval_id:"", evidence:[], document:null}),
     event(agent_event(run_started, _{run_id:Run, workspace_id:S.workspace_id,
           objective:Objective, profile:Profile, budget:Budget})),
+    rlm_cancellation_token(Token), assertz(run_token(Run,Token)),
+    assertz(worker_state(Run,pending)),
     rlm_async_submit(agentprolog_session:work(Run, Objective), Future),
     assertz(active(Run, Future)).
 
 work(Run, Objective, done) :-
+    setup_call_cleanup(begin_work(Run),work_body(Run,Objective),end_work(Run)).
+begin_work(Run) :-
+    with_mutex(agentprolog_session,
+      (checkpoint(S), S.run_id == Run, S.phase == "running",
+       retractall(worker_state(Run,_)),assertz(worker_state(Run,running)))).
+end_work(Run) :-
+    with_mutex(agentprolog_session,
+      (retractall(worker_state(Run,_)),assertz(worker_state(Run,finished)),
+       checkpoint(S),
+       (S.run_id == Run, S.phase == "cancelling"
+        -> finish(_{status:"cancelled",cleanup_confirmed:true}) ; true))).
+request_stop(Run) :-
+    update(_{phase:"cancelling"}),
+    event(agent_event(verification,"cancellation",_{status:"requested",cleanup_confirmed:false})),
+    (run_token(Run,Token) -> rlm_cancel(Token) ; true),
+    (active(Run,Future) -> rlm_future_cancel(Future,_) ; true),
+    (worker_state(Run,running) -> true
+     ; finish(_{status:"cancelled",cleanup_confirmed:true})).
+work_body(Run,Objective) :-
     executor(Config),
     catch((native_execute(Config, Objective, Run, Outcome) -> true ; Outcome=error(failed)), _, Outcome=error(exception)),
     with_mutex(agentprolog_session,
@@ -197,7 +222,9 @@ native_execute(Config, Objective, Run, Outcome) :-
          (observed_binding(Handler,Run,Schema.name,Observed), tool_register(Registry, Schema, Observed, ok(_)))),
        ((memberchk(model_handler(_),Config.runtime_options);memberchk(planner_handler(_),Config.runtime_options)) -> Stream=[]
         ; Stream=[text_delta_handler(prolog_agent_ui_facade:ui_stream_handler(Run,agentprolog_session:session_event(Run)))]),
-       append(Stream,[tool_registry(Registry),capabilities(Config.capabilities),budget(Config.budget)|Config.runtime_options],Options),
+       (run_token(Run,Token) -> Cancel=[cancel_token(Token)] ; Cancel=[]),
+       append(Stream,Cancel,Controls),
+       append(Controls,[tool_registry(Registry),capabilities(Config.capabilities),budget(Config.budget)|Config.runtime_options],Options),
        (get_dict(mode,Config,Mode) -> true ; Mode=direct),
        native_mode(Mode,Objective,Options,Outcome)),
       tool_registry_destroy(Registry)).
@@ -233,11 +260,24 @@ complete(Run, Outcome) :-
           bounded_event(agent_event(model_delta,Run,Text), Delta), event(Delta),
           event(agent_event(message_completed,Run))),
           (get_dict(usage,Result,Usage) -> event(agent_event(usage,Usage)) ; true),
+          provider_route(Result),
           executor(Config),
           (get_dict(validate_artifact,Config.hooks,Hook) -> call(Hook,Result,Decision) ; Decision=complete(_{text:Text})),
           complete_decision(Run, Decision)
        ; safe_failure(Outcome,Failure), finish(Failure))
     ; true).
+
+provider_route(Result) :-
+    (get_dict(response,Result,Response), is_dict(Response)
+     -> findall(Key-Text,(member(Key,[provider,requested_model,selected_model]),
+          get_dict(Key,Response,Value), route_text(Value,Text)),Pairs),
+        (Pairs == [] -> true
+         ; dict_pairs(Route,_,Pairs), put_dict(kind,Route,"provider_route",Trace),event(agent_event(trace,Trace)))
+     ; true).
+route_text(Value,Text) :-
+    (atom(Value) -> atom_string(Value,Text) ; string(Value),Text=Value),
+    string_length(Text,N), N=<200,
+    string_codes(Text,Codes), forall(member(C,Codes),(C>=32,C=<126)).
 
 % Only known categorical fields cross the boundary. Native exception terms,
 % provider payloads and URLs may contain credentials and are never rendered.

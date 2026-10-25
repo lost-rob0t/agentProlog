@@ -56,7 +56,9 @@ try {
   for (const name of ['workspace_read', 'workspace_create', 'workspace_modify', 'workspace_write']) {
     assert.ok(client.view.state.tools.some(t => t.name === name && t.status === 'finished'), `Missing actual tool result: ${name}`);
   }
-  const evidence = { status: 'passed', provider: 'zai_coding', model: 'glm-5.3-flash',
+  const route = client.view.state.traces.find(t => t.kind === 'provider_route');
+  const evidence = { status: 'passed', configured_provider: 'zai_coding', requested_model: 'glm-5.3-flash',
+    actual_provider: route?.provider ?? null, selected_model: route?.selected_model ?? null,
     agent_commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     runtime_commit: execFileSync('git', ['-C', runtime, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     elapsed_ms: Date.now() - start, usage: Object.fromEntries(Object.entries(client.view.state.usage)

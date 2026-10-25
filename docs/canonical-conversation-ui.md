@@ -95,16 +95,16 @@ was present in the implementation environment. The requested Z.AI subscription i
 provider owner. Final acceptance needs existing authorized access and confirmed
 key type/quota; no credentials were available here and no paid usage was started.
 
-## Hosted CI dependency access
+## Hosted CI status
 
-Authorized metadata confirms `lost-rob0t/prolog-rlm` is private and the configured
-commit exists. AgentProlog's repository-scoped `GITHUB_TOKEN` cannot read it:
-cross-repository checkout returns `Repository not found`, and Nix's GitHub
-archive request returns HTTP 404.
+The original private cross-repository dependency failure was confirmed against
+correct URLs and existing commits. The user made Prolog-RLM public, and the
+retry at AgentProlog `071e17f…` fetched it successfully. Nix flake checks, default
+package build/smoke and all 40 native config/host/filesystem tests passed on
+GitHub. No credentials or visibility settings were changed by this work.
 
-Minimal setup requires separate approval: provide a short-lived GitHub App
-installation token or fine-grained token with **Contents: read** for the private
-dependency, use it explicitly for dependency checkout and Nix GitHub
-`access-tokens`, and keep it out of source/logs/artifacts and untrusted fork code.
-No write/admin scope, visibility change or `pull_request_target` execution is
-needed. No credential or security settings have been changed by this work.
+Full generic E2E still exposed native mutation-continuation failures and an
+immediate-cancellation race on SWI 9.0.4. Those gates remain failures until fixed;
+active-handler cancellation and installed CLI interaction are separate tests.
+See [manual real-model acceptance](real-model-acceptance.md) for the opt-in
+`ZAI_API_KEY` mapping, exact model, bounds and required final proof.
