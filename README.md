@@ -93,3 +93,15 @@ The repository consumes `prolog-rlm` through its Nix flake dependency.
 - AgentProlog product epic: issue #1
 - DSH AgentFactory implementation: issue #7 / PR #8
 - upstream repository boundary: `lost-rob0t/prolog-rlm#141`
+
+## Coding tools and experts (candidate)
+
+The `prolog/` package adds confined read/search/write/patch tools, read-only Git
+inspection, bounded host-configured process/test profiles, and deterministic
+write/test-result experts. Host composition is `coding_registry_create/5`.
+See [coding-tools.md](docs/coding-tools.md) for contracts, local tests, the paired
+upstream dependency, and remaining interactive/Verify integration work.
+
+Language support adds inert Common Lisp/Prolog inspection, file-local symbol
+references, definition-aware edit proposals, and compiler diagnostics. See
+[language-tools.md](docs/language-tools.md), including the real SBCL/SWI repair tests.
