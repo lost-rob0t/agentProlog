@@ -1,0 +1,52 @@
+name: AgentProlog CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-and-packaged:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+      - uses: https://github.com/DeterminateSystems/nix-installer-action@main
+      - name: Read existing exact runtime dependency
+        id: runtime
+        run: |
+          rev=$(sed -n 's/.*github:lost-rob0t\/prolog-rlm\/\([0-9a-f]\{40\}\).*/\1/p' flake.nix)
+          test "${#rev}" -eq 40
+          echo "rev=$rev" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: nsaspy/prolog-rlm
+          ref: ${{ steps.runtime.outputs.rev }}
+          path: .runtime
+      - name: Install native SWI-Prolog
+        run: sudo apt-get update -qq && sudo apt-get install -y swi-prolog-nox
+      - name: Full offline documentation, configuration, package and native integration gate
+        run: |
+          set -o pipefail
+          bash scripts/check.sh "$GITHUB_WORKSPACE/.runtime" 2>&1 | tee deterministic-evidence.txt
+      - name: Installed CLI smoke
+        run: |
+          npm install --prefix "$RUNNER_TEMP/agentprolog-install" ./packages/conversation-ui
+          "$RUNNER_TEMP/agentprolog-install/node_modules/.bin/agentProlog" --help | grep -F 'canonical conversation UI'
+      - name: Pinned Nix package and documentation checks
+        run: nix flake check --print-build-logs
+      - name: Build and run default package
+        run: |
+          nix build .#agentProlog --print-build-logs
+          nix run .#agentProlog -- --help | grep -F 'canonical conversation UI'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: deterministic-native-evidence
+          path: deterministic-evidence.txt

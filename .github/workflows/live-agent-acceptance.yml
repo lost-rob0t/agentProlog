@@ -37,7 +37,7 @@ jobs:
           echo "rev=$rev" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
-          repository: lost-rob0t/prolog-rlm
+          repository: ${{ github.server_url == 'https://github.com' && 'lost-rob0t/prolog-rlm' || 'nsaspy/prolog-rlm' }}
           ref: ${{ steps.runtime.outputs.rev }}
           path: .runtime
       - name: Install runtime dependencies

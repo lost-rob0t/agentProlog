@@ -1,17 +1,17 @@
 :PROPERTIES:
-:ID: 9cb1f3ce-6a4e-42c4-b299-008c85e8329a
+:ID: ae10b8ee-76d9-435f-bca4-7a0f2e284622
 :END:
 #+TITLE: Development and testing
-#+CREATED: [2026-11-12 Thu 22:08]
-#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+CREATED: [2026-11-12 Thu 22:31]
+#+LAST_MODIFIED: [2026-11-12 Thu 22:31]
 #+ROAM_SCHEMA: org-roam-meta/v1
 #+ROAM_KIND: documentation
 #+ROAM_VISIBILITY: private
 #+CENSOR_PROFILE: strict
-#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:98997eac1cad3714664190929bb2130eac23f0d82f571d0b3341a083ca3566d3; repository target docs/wiki/development-and-testing.org; source links in body
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:7ca1fd00ed0ea6a234cf796b7506348ddc5166fa0c27260bbb67ec33c6f53c93; repository target docs/wiki/development-and-testing.org; source links in body
 #+AI_GENERATED: t
-#+AI_TAG: ai_12fbeb1109c76715
-#+FILETAGS: :ai:ai_12fbeb1109c76715:agentprolog:prolog-runtime:documentation:development-and-testing:
+#+AI_TAG: ai_fcf2360354c4c55d
+#+FILETAGS: :ai:ai_fcf2360354c4c55d:agentprolog:prolog-runtime:documentation:development-and-testing:
 
 #+PROPERTY: header-args :eval never-export
 #+description: Build outputs, exact-pin checks, CI lanes and honest acceptance evidence.
@@ -137,6 +137,7 @@ Native is not synonymous with live: a real SWI process and real filesystem can s
 
 | Workflow | Trigger / scope | Actual checks |
 |----------+-----------------+---------------|
+| [[file:../../.forgejo/workflows/ci.yml][Forgejo AgentProlog CI]] | Forgejo PRs; pushes to =main= | Full =scripts/check.sh= gate, installed CLI, Nix checks, default package build/help and deterministic evidence upload |
 | [[file:../../.github/workflows/ci.yml][CI]] | PRs; pushes to =main= | Nix checks, application build and packaged help smoke |
 | [[file:../../.github/workflows/conversation-ui.yml][Canonical conversation UI]] | PRs; pushes to =main= | JS tests and installed help; exact runtime source checkout; SWI suites, generic E2E and official fixture; upload textual native evidence |
 | [[file:../../.github/workflows/deepseek-harness.yml][DeepSeek Harness bridge]] | Matching package/workflow paths on PRs and =main= pushes | Node 22 protocol/lifecycle tests, not a real full Harness installation |
@@ -144,6 +145,15 @@ Native is not synonymous with live: a real SWI process and real filesystem can s
 | [[file:../../.github/workflows/live-agent-acceptance.yml][Manual real-model agent acceptance]] | =workflow_dispatch= only | Exact reviewed commit + explicit existing-subscription authorization, runtime adapter preflight, bounded live filesystem gate, evidence upload |
 
 Checked-in workflows are intended gates, not proof that a particular commit passed on the hosting service. Do not transfer an older commit's green status to the current pin or claim that a manual workflow is registered on the default branch without checking the host.
+
+Forgejo selects the native =.forgejo/workflows/= directory; the =.github/=
+lanes above describe GitHub operation, including its manually authorized live
+workflow. The Forgejo automatic lane does not request live model acceptance or
+inherit credential-bearing dispatch merely from that GitHub file. Its installer
+action uses an explicit upstream URL because Forgejo's default action mirror
+does not contain the Determinate installer. Runtime checkout uses the canonical
+Forgejo =nsaspy/prolog-rlm= at the same exact flake SHA; GitHub uses
+=lost-rob0t/prolog-rlm=. Neither mapping changes the selected runtime revision.
 
 * Downstream integration is opt-in
 
