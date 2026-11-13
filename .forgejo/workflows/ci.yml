@@ -38,8 +38,11 @@ jobs:
         run: |
           npm install --prefix "$RUNNER_TEMP/agentprolog-install" ./packages/conversation-ui
           "$RUNNER_TEMP/agentprolog-install/node_modules/.bin/agentProlog" --help | grep -F 'canonical conversation UI'
+      # Evidence lives in the job log; artifact upload is best-effort because
+      # this runner's act backend rejects upload-artifact v4 (GHESNotSupported).
       - uses: actions/upload-artifact@v4
         if: always()
+        continue-on-error: true
         with:
           name: deterministic-native-evidence
           path: deterministic-evidence.txt
