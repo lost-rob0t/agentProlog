@@ -20,6 +20,7 @@
 :- use_module(library(rlm_tool)).
 :- use_module(library(rlm_effect), [rlm_effect_store_open/1, rlm_effect_store_close/0, rlm_effect_normalize/2]).
 :- use_module('./agentprolog_config').
+:- use_module('./agentprolog_prompt').
 
 
 :- dynamic worker_state/2, run_token/2, pending_native/4.
@@ -32,7 +33,8 @@ main(Args) :-
     ( Args = [Directory, Project|Rest], cli_options(Rest, Options)
     -> findall(Cap,(member(allow_cap(Cap),Options)),Caps),
        exclude(is_allow_tool,Options,LoadOptions),
-       load_configuration(Project, [allowed_capabilities(Caps)|LoadOptions], Config), serve(Directory, Config)
+       (Caps==[] -> Effective=LoadOptions ; Effective=[allowed_capabilities(Caps)|LoadOptions]),
+       load_configuration(Project, Effective, Config), serve(Directory, Config)
     ; format(user_error, 'Usage: agentprolog-session STATE_DIRECTORY PROJECT [--trust-project] [--plugin FILE]~n', []), halt(2) ).
 is_allow_tool(allow_cap(_)).
 cli_options([], []).
@@ -41,6 +43,9 @@ cli_options(['--allow-context',Name|R], [allow_cap(context(Name))|O]) :- cli_opt
 cli_options(['--allow-tool',Name|R], [allow_cap(tool(Name))|O]) :- cli_options(R,O).
 cli_options(['--trust-project'|R], [trusted_project(true)|O]) :- cli_options(R,O).
 cli_options(['--plugin',Path|R], [plugin(Path)|O]) :- cli_options(R,O).
+cli_options(['--package',Path|R], [package(Path)|O]) :- cli_options(R,O).
+cli_options(['--agent',Name|R], [agent(Name)|O]) :- cli_options(R,O).
+cli_options(['--config',Path|R], [config_file(Path)|O]) :- cli_options(R,O).
 
 serve(Directory, Config) :-
     make_directory_path(Directory),
@@ -237,11 +242,12 @@ native_execute(Config, Objective, Run, Outcome) :-
     setup_call_cleanup(tool_registry_create(Registry),
       (forall(member(tool(Schema, Handler), Config.tools),
          (observed_binding(Handler,Run,Schema.name,Observed), tool_register(Registry, Schema, Observed, ok(_)))),
-       ((memberchk(model_handler(_),Config.runtime_options);memberchk(planner_handler(_),Config.runtime_options)) -> Stream=[]
+        prepare_runtime_options(Config,Registry,Objective,RuntimeOptions),
+        ((memberchk(model_handler(_),RuntimeOptions);memberchk(planner_handler(_),RuntimeOptions)) -> Stream=[]
         ; Stream=[text_delta_handler(prolog_agent_ui_facade:ui_stream_handler(Run,agentprolog_session:session_event(Run)))]),
        (run_token(Run,Token) -> Cancel=[cancel_token(Token)] ; Cancel=[]),
        append(Stream,Cancel,Controls),
-       append(Controls,[tool_registry(Registry),capabilities(Config.capabilities),budget(Config.budget)|Config.runtime_options],Options),
+        append(Controls,[tool_registry(Registry),capabilities(Config.capabilities),budget(Config.budget)|RuntimeOptions],Options),
        (get_dict(mode,Config,Mode) -> true ; Mode=direct),
        native_mode(Mode,Objective,Options,Initial), native_continuation(Run,Initial,Outcome)),
       tool_registry_destroy(Registry)).
@@ -276,8 +282,18 @@ native_continuation(Run,approval_required(Public),Outcome) :- !,
 native_continuation(_,Outcome,Outcome).
 
 observed_binding(tool_handler(Preflight,Execute),Run,Name,
-                 tool_handler(Preflight,agentprolog_session:observed_execute(Execute,Run,Name))) :- !.
+                 tool_handler(agentprolog_session:observed_preflight(Preflight,Run,Name),
+                              agentprolog_session:observed_execute(Execute,Run,Name))) :- !.
 observed_binding(Handler,Run,Name,agentprolog_session:observed_execute(Handler,Run,Name)).
+observed_preflight(Handler,Run,Name,Args,Normalized,Details) :-
+    catch(call(Handler,Args,Normalized,Details),Error,
+      (preflight_failure(Error,Code),
+       session_event(Run,agent_event(verification,Name,_{status:"failed",phase:"preflight",code:Code})),
+       throw(Error))).
+preflight_failure(error(workspace_error(Code),_),Code) :-
+    memberchk(Code,[stale_content,non_unique_match,missing_file,already_exists,invalid_path,
+      symlink_denied,file_too_large,empty_match,missing_parent,not_regular_file]), !.
+preflight_failure(_,confinement_denied).
 observed_execute(Handler,Run,Name,Args,Value) :-
     uuid_string(Id), atom_string(Name,ToolName),
     session_event(Run,agent_event(tool_started,Id,ToolName,Args)),
@@ -305,7 +321,7 @@ complete(Run, Outcome) :-
           executor(Config),
           (get_dict(validate_artifact,Config.hooks,Hook) -> call(Hook,Result,Decision) ; Decision=complete(_{text:Text})),
           complete_decision(Run, Decision)
-       ; safe_failure(Outcome,Failure), finish(Failure))
+        ; failed_usage(Outcome),safe_failure(Outcome,Failure), finish(Failure))
     ; true).
 
 provider_route(Result) :-
@@ -315,6 +331,10 @@ provider_route(Result) :-
         (Pairs == [] -> true
          ; dict_pairs(Route,_,Pairs), put_dict(kind,Route,"provider_route",Trace),event(agent_event(trace,Trace)))
      ; true).
+
+failed_usage(error(Error)) :- is_dict(Error),get_dict(usage,Error,Usage),is_dict(Usage), !,
+    event(agent_event(usage,Usage)).
+failed_usage(_).
 route_text(Value,Text) :-
     (atom(Value) -> atom_string(Value,Text) ; string(Value),Text=Value),
     string_length(Text,N), N=<200,

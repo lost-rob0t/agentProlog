@@ -71,4 +71,27 @@ test(model_argv_is_explicit_capability) :-
     agentprolog_session:cli_options(['--allow-model',openrouter],Options),
     assertion(Options==[allow_cap(model(openrouter))]).
 
+model_with_system(Request,Outcome) :-
+    findall(Text,(member(M,Request.messages),M.role==system,Text=M.content),Texts),
+    atomics_to_string(Texts," ",All),assertion(sub_string(All,_,_,_,"CONFIGURED_SYSTEM_MARKER")),
+    model(Request,Outcome).
+test(configured_instructions_reach_actual_canonical_model_callback) :-
+    config(C0),agentprolog_config:default_configuration(Defaults),
+    put_dict(C0.budget,Defaults.budget,Budget),
+    put_dict(_{budget:Budget,runtime_options:[provider(provider(openai_compatible,[])),
+      provider_name(openai_compatible),model_handler(plunit_agentprolog_session:model_with_system),
+      system_prompt("CONFIGURED_SYSTEM_MARKER")]},C0,C),
+    agentprolog_session:native_execute(C,"hello","configured-system",ok(_)).
+
+test(failed_run_retains_actual_usage) :-
+    tmp_file(agentprolog_failed_usage,Directory),
+    setup_call_cleanup(make_directory(Directory),
+      (config(C),agentprolog_session:initialize(Directory,C),
+       agentprolog_session:update(_{phase:"running",run_id:"failed-usage"}),
+       agentprolog_session:complete("failed-usage",error(_{kind:budget_exceeded,phase:budget,
+         usage:_{model_calls:2,total_tokens:20,cost_usd:0.01,cost_known:true}})),
+       agentprolog_session:checkpoint(S),assertion(S.phase=="failed"),
+       assertion(S.view.usage.cost_usd=:=0.01),assertion(S.view.usage.total_tokens==20)),
+      delete_directory_and_contents(Directory)).
+
 :- end_tests(agentprolog_session).

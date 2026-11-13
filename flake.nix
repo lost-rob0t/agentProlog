@@ -25,6 +25,13 @@
             exec ${upstreamSwipl} -q -p library=${./prolog} -s ${./prolog}/agentprolog_session.pl -- "$@"
           '';
         };
+        importSkill = pkgs.writeShellApplication {
+          name = "agentprolog-import-skill";
+          runtimeInputs = [ upstream ];
+          text = ''
+            exec ${upstreamSwipl} -q -s ${./prolog}/agentprolog_import_skill.pl -- "$@"
+          '';
+        };
         agentProlog = pkgs.writeShellApplication {
           name = "agentProlog";
           runtimeInputs = [ pkgs.nodejs_22 sessionHost ];
@@ -47,14 +54,16 @@
         packages.default = agentProlog;
         packages.conversation-ui = conversationUi;
         packages.session-host = sessionHost;
+        packages.import-skill = importSkill;
 
         apps.agentProlog = flake-utils.lib.mkApp { drv = agentProlog; };
         apps.zara-runtime = flake-utils.lib.mkApp { drv = agentPrologZaraRuntime; };
         apps.default = self.apps.${system}.agentProlog;
         apps.conversation = flake-utils.lib.mkApp { drv = conversationUi; };
+        apps.import-skill = flake-utils.lib.mkApp { drv = importSkill; };
 
         devShells.default = pkgs.mkShell {
-          packages = [ upstream pkgs.nodejs_22 ];
+          packages = [ upstream pkgs.nodejs_22 importSkill ];
         };
 
         checks.conversation-cli = pkgs.runCommand "agentprolog-conversation-cli" {
@@ -65,12 +74,24 @@
         '';
 
         checks.generic-native = pkgs.runCommand "agentprolog-generic-native" {
-          nativeBuildInputs = [ upstream ];
+          nativeBuildInputs = [ upstream pkgs.nodejs_22 ];
         } ''
           ${upstreamSwipl} -q \
             -s ${self}/test/agentprolog_config_test.pl \
+            -s ${self}/test/agentprolog_agents_test.pl \
+            -s ${self}/test/agentprolog_skills_test.pl \
+            -s ${self}/test/agentprolog_check_tool_test.pl \
             -s ${self}/test/agentprolog_session_test.pl \
             -s ${self}/test/agentprolog_workspace_tools_test.pl -g "run_tests,halt"
+          touch "$out"
+        '';
+
+        checks.native-skill-import = pkgs.runCommand "agentprolog-native-skill-import" {
+          nativeBuildInputs = [ importSkill upstream ];
+        } ''
+          agentprolog-import-skill ${self}/skills/markdown-to-prolog "$TMPDIR/imported.pl"
+          ${upstreamSwipl} -q -s ${self}/prolog/agentprolog_skills.pl \
+            -g "load_skill_units(['$TMPDIR/imported.pl'],[_]),halt"
           touch "$out"
         '';
 

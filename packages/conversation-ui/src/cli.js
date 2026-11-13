@@ -9,7 +9,7 @@ import { Client } from './client.js';
 import { render, safe } from './render.js';
 export const HELP = `AgentProlog canonical conversation UI
 Usage: agentProlog [--project DIR] [--state DIR]
-                  [--plugin FILE ...] [--trust-project]
+                  [--config FILE] [--plugin FILE ...] [--package DIR ...] [--agent NAME] [--trust-project]
                   [--allow-tool NAME ...] [--allow-context OP ...] [--allow-model NAME ...]
        agentProlog --sidecar EXECUTABLE [--sidecar-arg ARG ...]
        agentProlog --help
@@ -47,7 +47,8 @@ export async function main(argv = process.argv.slice(2)) {
     else if (option === '--sidecar-arg') args.push(value);
     else if (option === '--project') project = value;
     else if (option === '--state') state = resolve(value);
-    else if (option === '--plugin') hostFlags.push(option, realpathSync(value));
+    else if (option === '--plugin' || option === '--package' || option === '--config') hostFlags.push(option, realpathSync(value));
+    else if (option === '--agent') hostFlags.push(option, value);
     else if (option === '--allow-tool' || option === '--allow-context' || option === '--allow-model') hostFlags.push(option, value);
     else throw new Error(`Unknown argument: ${option}`);
   }

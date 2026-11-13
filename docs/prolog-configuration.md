@@ -75,6 +75,10 @@ A plugin or project module returns a dict containing any of:
 | `runtime_options` | Whitelisted native options described below |
 | `budget` | Dict narrowing the operator budget ceiling |
 | `hooks` | Trusted artifact policy hook described below |
+| `agents` | Dict of named agent configurations inheriting and narrowing the merged configuration |
+| `default_agent` | Agent selected unless the operator supplies `--agent NAME` |
+| `skill_files` | Inert native Prolog skill files; paths resolve relative to their config source |
+| `selected_skills` | Explicit skill names which the canonical compiler must admit |
 
 Precedence is defaults, then plugins in explicit command-line order, then the
 trusted project configuration. `profile` and `mode` use the last supplied value.
@@ -87,7 +91,7 @@ unsupported options and invalid schemas fail closed.
 
 Native options allowed in configuration are unary terms named `provider`,
 `provider_name`, `model_handler`, `planner_handler`, `prompt_compile_mode`, and
-`system_prompt`. Model/planner handlers must be ground module-qualified callables.
+`system_prompt`, `agent_name`, and `planner_max_tokens`. Model/planner handlers must be ground module-qualified callables.
 `model_handler` supplies deterministic direct/nested model I/O; `planner_handler`
 supplies deterministic root planner I/O for `mode:rlm`. Both use the canonical
 runtime callback contract `call(Handler, Request, Outcome)` and must stay in trusted
@@ -165,3 +169,62 @@ swipl -q -p library=/path/to/prolog-rlm/prolog \
 
 These deterministic tests do not establish that arbitrary trusted plugin code is
 safe, nor do they replace the final bounded real-model acceptance gate.
+
+## Full operator configuration in Prolog
+
+`--config /absolute/operator.pl` explicitly trusts a module exporting
+`agentprolog_options/1`. The predicate returns exactly one list of host options:
+
+```prolog
+:- module(my_operator, [agentprolog_options/1]).
+agentprolog_options([
+    package('/approved/local/swi-pack'),
+    plugin('/approved/project-tools.pl'),
+    agent(builder),
+    trusted_project(true),
+    allowed_capabilities([tool(workspace_read), context(peek)]),
+    budget_ceiling(_{max_model_calls:16, max_total_tokens:65536}),
+    budget_limits(_{max_cost_usd:0.10})
+]).
+```
+
+`budget_ceiling` is operator-owned and may replace default ceilings; plugins,
+projects and named agents still cannot expand it. A selected named agent also
+cannot expand its parent configuration's capabilities or budget. Every configured
+agent can specify mode, provider, model, instructions, tools, skills, hooks and
+budgets through the same schema. Duplicate named agents fail rather than shadow.
+Conflicting single-valued CLI/operator options fail instead of guessing precedence.
+Project/state directories remain explicit launch locations, not model settings.
+
+A local package is an ordinary SWI-Prolog pack with `pack.pl` and the explicitly
+trusted `prolog/agentprolog_plugin.pl` entrypoint exporting `agentprolog_config/1`.
+`--package DIR` attaches its library directory and loads that entrypoint. Nothing
+is downloaded or installed. Trusting a pack means trusting all its executable
+code, just like a plugin. See [`examples/packs/coding`](../examples/packs/coding).
+
+Native skill files contain one data term:
+
+```prolog
+agentprolog_skills([
+    prompt_unit{unit:skill('review-diff'), description:"Review a diff",
+                content:"Check correctness and regressions before approval."}
+]).
+```
+
+These are upstream `rlm_prompt_compiler` units, not a second IR or interpreter.
+The loader is bounded and never consults these files. Directives, extra terms,
+duplicate skill identities and self-pinned mandatory policy are rejected. Source
+hashes/provenance enter configuration identity. A skill never supplies a callable
+or grants a capability. Imported Markdown uses upstream `rlm_skill`, preserving
+instruction/routing provenance; resource files are not copied into the native
+instruction document.
+
+```sh
+nix run .#import-skill -- /path/to/SKILL-package /path/to/native.pl
+```
+
+The canonical compiler selects/limits native context and trusted system
+instructions. The host forwards that projection through upstream provider/model
+callbacks. Such turns currently use non-streaming model I/O; ordinary unprojected
+turns retain the existing streaming path. No provider transport, scheduler,
+authority mechanism or tool interpreter is reimplemented downstream.

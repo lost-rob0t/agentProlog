@@ -88,6 +88,31 @@ nix flake check
 
 The repository consumes `prolog-rlm` through its Nix flake dependency.
 
+## Prolog-configured agents, skills and packages
+
+```sh
+nix run .#agentProlog -- --project /path/to/project --config /path/to/operator.pl
+nix run .#import-skill -- /path/to/markdown-skill /path/to/native-skill.pl
+```
+
+The explicitly trusted operator file exports `agentprolog_options/1`: local
+packages/plugins, selected agent, project trust, capability grants and budget
+ceilings are all Prolog terms. Product/project modules export
+`agentprolog_config/1` for tools, providers, instructions, named agents and native
+skills. Local packages are ordinary SWI-Prolog packs; skill files serialize the
+existing upstream `prompt_unit` IR as inert Prolog data. No second agent runtime,
+prompt compiler or package manager is introduced.
+
+See [Prolog configuration](docs/prolog-configuration.md), the
+[coding package](examples/packs/coding/), and
+[todo-app acceptance](docs/todo-app-acceptance.md).
+
+Full local deterministic gate:
+
+```sh
+bash scripts/check.sh /path/to/the/pinned/prolog-rlm
+```
+
 ## Architecture authority
 
 - AgentProlog product epic: issue #1

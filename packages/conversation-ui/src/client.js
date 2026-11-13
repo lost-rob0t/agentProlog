@@ -53,8 +53,13 @@ export class Client extends EventEmitter {
       optional_capabilities: [], ...(this.view.cursor === null ? {} : { resume_from: this.view.cursor }),
     } });
     if (!this.ready && generation === this.generation && this.connected) {
-      this.snapshotTimer = setTimeout(() => fail(new ProtocolError('snapshot_timeout', 'Runtime negotiated but supplied no canonical snapshot.')), this.timeoutMs);
+      await new Promise((resolve, reject) => {
+        this.snapshotWaiter = { resolve, reject };
+        this.snapshotTimer = setTimeout(() => fail(new ProtocolError('snapshot_timeout', 'Runtime negotiated but supplied no canonical snapshot.')), this.timeoutMs);
+      });
     }
+    requireValue(generation === this.generation, 'connection_superseded');
+    requireValue(this.ready && this.connected, 'disconnected');
     return result;
   }
   receive(frame) {
@@ -93,6 +98,7 @@ export class Client extends EventEmitter {
     if (frame.kind === 'snapshot') {
       requireValue(frame.session_id === this.expectedSession, 'session_mismatch');
       this.view.snapshot(frame); this.ready = true; clearTimeout(this.snapshotTimer);
+      this.snapshotWaiter?.resolve(); this.snapshotWaiter = null;
     } else if (frame.kind === 'event') {
       requireValue(this.ready, 'snapshot_required');
       if (!this.view.event(frame)) return;
@@ -126,6 +132,7 @@ export class Client extends EventEmitter {
   }
   fail(error) {
     this.connected = false; this.ready = false; clearTimeout(this.snapshotTimer);
+    this.snapshotWaiter?.reject(error); this.snapshotWaiter = null;
     for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(error); }
     this.pending.clear(); this.emit('fault', error);
     const child = this.child;
@@ -138,6 +145,7 @@ export class Client extends EventEmitter {
   async close() {
     const child = this.child;
     ++this.generation; this.connected = false; this.ready = false; clearTimeout(this.snapshotTimer);
+    this.snapshotWaiter?.reject(new ProtocolError('connection_superseded')); this.snapshotWaiter = null;
     for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new ProtocolError('disconnected')); }
     this.pending.clear(); this.child = null;
     if (!child || !child.pid || child.exitCode !== null || child.signalCode !== null) return;
