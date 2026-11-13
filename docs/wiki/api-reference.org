@@ -1,17 +1,17 @@
 :PROPERTIES:
-:ID: f627b9df-cf14-4e8e-81b7-d1f48f1572ef
+:ID: b4a7d6d4-6e65-45aa-ab13-aecb1208fe80
 :END:
 #+TITLE: API reference
-#+CREATED: [2026-11-12 Thu 23:11]
-#+LAST_MODIFIED: [2026-11-12 Thu 23:11]
+#+CREATED: [2026-11-12 Thu 23:33]
+#+LAST_MODIFIED: [2026-11-12 Thu 23:33]
 #+ROAM_SCHEMA: org-roam-meta/v1
 #+ROAM_KIND: documentation
 #+ROAM_VISIBILITY: private
 #+CENSOR_PROFILE: strict
-#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:0f1c46a0450dd07ff47bdcc79627a41b902e906e7a2036f37bf9ce52832f1809; repository target docs/wiki/api-reference.org; source links in body
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:71b31daef7997304ea70ba12a510e5772604f79661f38bbe89df91a2831a5619; repository target docs/wiki/api-reference.org; source links in body
 #+AI_GENERATED: t
-#+AI_TAG: ai_b14df4ff1802f6d4
-#+FILETAGS: :ai:ai_b14df4ff1802f6d4:agentprolog:prolog-runtime:documentation:api-reference:
+#+AI_TAG: ai_cd68d28f00560e21
+#+FILETAGS: :ai:ai_cd68d28f00560e21:agentprolog:prolog-runtime:documentation:api-reference:
 
 #+PROPERTY: header-args :eval never-export
 #+description: Local Prolog exports, callback ABIs, canonical client, wire commands and CLI.
@@ -275,6 +275,8 @@ Direct host argv is =agentprolog-session STATE_DIRECTORY PROJECT [options]=. Its
 | =/cancel= | Request =session.cancel= |
 | =/approve ID DECISION= | Send exact offered approval decision; never guess a persistent grant |
 | =/answer ID TEXT= | Answer pending question |
+| =/answer= / =/answer list= | Reopen newest pending question / list all interactions as numbered menus |
+| =/approve= (bare) | Reopen newest pending approval as a numbered choice menu |
 | =/report-bug [TEXT]= | Submit one bug-intake interview objective; answers still go through =/answer= |
 | =/help= | Print help |
 | =/quit= | Close sidecar and exit |

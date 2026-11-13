@@ -1,17 +1,17 @@
 :PROPERTIES:
-:ID: 7e84f461-2d52-4a98-9b40-758f9f0623f4
+:ID: 1c046f4a-7973-4bae-9731-1bccc69316cc
 :END:
 #+TITLE: Sessions and recovery
-#+CREATED: [2026-11-12 Thu 23:11]
-#+LAST_MODIFIED: [2026-11-12 Thu 23:11]
+#+CREATED: [2026-11-12 Thu 23:33]
+#+LAST_MODIFIED: [2026-11-12 Thu 23:33]
 #+ROAM_SCHEMA: org-roam-meta/v1
 #+ROAM_KIND: documentation
 #+ROAM_VISIBILITY: private
 #+CENSOR_PROFILE: strict
-#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:a43e1beb9adf6ded05d3513bf47d574178b7e56883cbb834967546746ecc9f56; repository target docs/wiki/sessions-and-recovery.org; source links in body
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:b715b46827053d099fb2063e851ae6f6eb89b808a0d81a3e4b8b80733ebc3658; repository target docs/wiki/sessions-and-recovery.org; source links in body
 #+AI_GENERATED: t
-#+AI_TAG: ai_26e108d1820ed1bd
-#+FILETAGS: :ai:ai_26e108d1820ed1bd:agentprolog:prolog-runtime:documentation:sessions-and-recovery:
+#+AI_TAG: ai_85cbe494567d20fa
+#+FILETAGS: :ai:ai_85cbe494567d20fa:agentprolog:prolog-runtime:documentation:sessions-and-recovery:
 
 #+PROPERTY: header-args :eval never-export
 #+description: Project-scoped sidecar ownership, durable checkpoints, approvals and honest reconnect behavior.
@@ -99,6 +99,7 @@ Sources: [[file:../../prolog/agentprolog_session.pl][serve/initialize/config_bin
 | =/select= | =session.select= does the same; no arbitrary session selector exists here |
 | =/resume= | =session.resume= starts a *new run* for the last stored objective |
 | =/answer ID TEXT= | Answers an actual pending question and starts a run with the answer as objective |
+| =/answer= / =/answer list= | Bare reopens the newest pending question as a menu; list shows all interactions, answered ones read-only |
 | =/report-bug [TEXT]= | Submits one bug-intake interview objective; its questions are ordinary pending questions |
 | =/cancel= | Requests canonical cancellation; acknowledgement is not final cleanup |
 | =/reconnect= | Closes/restarts the configured sidecar and obtains its current canonical checkpoint |

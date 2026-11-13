@@ -52,6 +52,10 @@ const result = f => send({protocol:f.protocol,kind:'result',session_id:snapshot.
 createInterface({input:process.stdin}).on('line', line => {
  const f = JSON.parse(line); appendFileSync(log, JSON.stringify(f)+'\\n');
  if (f.kind === 'negotiate') { if (scenario === 'silence') return; result(f); send(snapshot); return; }
+ if (f.command === 'question.answer') {
+   result(f); event('question_answered',{question_id:f.payload.question_id, answer:f.payload.answer}); return; }
+ if (f.command === 'approval.decide') {
+   result(f); event('approval_resolved',{approval_id:f.payload.approval_id, decision:f.payload.decision}); return; }
  if (f.command === 'session.cancel') {
    if (scenario === 'cancel-silence') return;
    result(f); event('run_finished',{outcome:{status:'cancelled'}}); return;
@@ -67,6 +71,10 @@ createInterface({input:process.stdin}).on('line', line => {
  else if (scenario === 'complete') event('run_finished',{outcome:{status:'complete'}});
   else if (scenario === 'failed') event('run_finished',{outcome:{status:'budget_exceeded'}});
   else if (scenario === 'signal-on-turn') { result(f); process.kill(process.ppid,'SIGINT'); return; }
+  else if (scenario === 'menu') {
+    event('question_required',{question_id:'q_main',prompt:'Which provider?',choices:['openrouter','zai']});
+    event('question_required',{question_id:'q_follow',prompt:'Priority?',choices:['fast','slow']});
+  }
  result(f);
 });
 `);
@@ -233,4 +241,84 @@ test('CLI bare /report-bug starts intake without inventing a symptom', async t =
   const objective = await driveReportBug(t, '/report-bug');
   assert.equal(objective, reportBugObjective(''));
   assert.match(objective, /typed no description yet/);
+});
+
+async function frames(log) {
+  return (await readFile(log, 'utf8').catch(() => '')).trim().split('\n')
+    .filter(Boolean).map(JSON.parse);
+}
+async function driveCli(t, scenario, steps) {
+  const w = await workspace(t), host = await mockHost(w);
+  const cliJs = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const child = spawn(process.execPath, [cliJs, '--sidecar', process.execPath,
+    ...[host, scenario, w.log].flatMap(arg => ['--sidecar-arg', arg])],
+  { cwd: w.directory, env: cleanEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+  t.after(() => { if (child.exitCode === null) child.kill('SIGKILL'); });
+  let stdout = '', stderr = '';
+  child.stdout.on('data', chunk => { stdout += chunk; });
+  child.stderr.on('data', chunk => { stderr += chunk; });
+  const exited = new Promise(resolve => child.once('exit', code => resolve(code)));
+  for (let i = 0; i < 150 && !stdout.includes('agentprolog>'); i++) await delay(20);
+  assert.ok(stdout.includes('agentprolog>'), 'CLI reached its prompt');
+  for (const step of steps) {
+    if (step.send !== undefined) child.stdin.write(`${step.send}\n`);
+    if (step.stdout) for (let i = 0; i < 200 && !step.stdout.test(stdout); i++) await delay(20);
+    if (step.stderr) for (let i = 0; i < 200 && !step.stderr.test(stderr); i++) await delay(20);
+    if (step.logHas) for (let i = 0; i < 200 && !(await frames(w.log)).some(step.logHas); i++) await delay(20);
+  }
+  child.stdin.end('/quit\n');
+  const code = await exited;
+  return { code, stdout: () => stdout, stderr: () => stderr, frames: () => frames(w.log) };
+}
+
+test('CLI /answer menu answers the newest pending question by number', async t => {
+  const run = await driveCli(t, 'menu', [
+    { send: 'go', logHas: f => f.command === 'session.turn' },
+    { send: '/answer', stdout: /answer q_follow>/ },
+    { send: '1', logHas: f => f.command === 'question.answer' },
+  ]);
+  assert.equal(run.code, 0);
+  const answers = (await run.frames()).filter(f => f.command === 'question.answer');
+  assert.equal(answers.length, 1);
+  assert.deepEqual(answers[0].payload, { question_id: 'q_follow', answer: 'fast' });
+  assert.match(run.stdout(), /Which provider\?/);
+});
+
+test('CLI /answer list selects any pending question and shows answered history read-only', async t => {
+  const run = await driveCli(t, 'menu', [
+    { send: 'go', logHas: f => f.command === 'session.turn' },
+    { send: '/answer list', stdout: /select> / },
+    { send: '1', stdout: /answer q_main>/ },
+    { send: '2', logHas: f => f.command === 'question.answer' && f.payload.question_id === 'q_main' },
+    { send: '/answer', stdout: /answer q_follow>/ },
+    { send: 'slow', logHas: f => f.command === 'question.answer' && f.payload.question_id === 'q_follow' },
+    { send: '/answer list', stdout: /already submitted/ },
+    { send: '/answer', stderr: /No pending questions/ },
+  ]);
+  assert.equal(run.code, 0);
+  const answers = (await run.frames()).filter(f => f.command === 'question.answer');
+  assert.deepEqual(answers.map(f => f.payload), [
+    { question_id: 'q_main', answer: 'zai' },
+    { question_id: 'q_follow', answer: 'slow' },
+  ]);
+  assert.match(run.stdout(), /– question q_main \(answered\) answer: zai/);
+  assert.match(run.stderr(), /No pending questions/);
+});
+
+test('CLI /approve menu submits a numbered offered decision', async t => {
+  const run = await driveCli(t, 'blocked', [
+    { send: 'go', logHas: f => f.command === 'session.turn' },
+    { send: '/approve', stdout: /approve approval>/ },
+    { send: '1', logHas: f => f.command === 'approval.decide' },
+  ]);
+  assert.equal(run.code, 0);
+  const decisions = (await run.frames()).filter(f => f.command === 'approval.decide');
+  assert.deepEqual(decisions.map(f => f.payload), [{ approval_id: 'approval', decision: 'allow_once' }]);
+});
+
+test('CLI bare numeric input outside menus stays an ordinary objective', async t => {
+  const run = await driveCli(t, 'ack-only', [{ send: '42' }]);
+  assert.equal(run.code, 0);
+  const turns = (await run.frames()).filter(f => f.command === 'session.turn');
+  assert.deepEqual(turns.map(f => f.payload), [{ objective: '42' }]);
 });

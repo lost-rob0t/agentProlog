@@ -1,17 +1,17 @@
 :PROPERTIES:
-:ID: 8dcafb79-49c8-4350-9753-82ee75618549
+:ID: b6e605d0-94a8-454d-8134-face6c3bc45f
 :END:
 #+TITLE: Getting started with AgentProlog
-#+CREATED: [2026-11-12 Thu 23:11]
-#+LAST_MODIFIED: [2026-11-12 Thu 23:11]
+#+CREATED: [2026-11-12 Thu 23:33]
+#+LAST_MODIFIED: [2026-11-12 Thu 23:33]
 #+ROAM_SCHEMA: org-roam-meta/v1
 #+ROAM_KIND: documentation
 #+ROAM_VISIBILITY: private
 #+CENSOR_PROFILE: strict
-#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:0615e7c8c6c2842eff27b782ae671f2517683b9691cacbddcb99ba765744f650; repository target docs/wiki/getting-started.org; source links in body
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:06d4f9aa24a261a0b432bc4d7ebc5fc8814011d9f27685b8232ad60c13e0bbc6; repository target docs/wiki/getting-started.org; source links in body
 #+AI_GENERATED: t
-#+AI_TAG: ai_8ddd004e197c4760
-#+FILETAGS: :ai:ai_8ddd004e197c4760:agentprolog:prolog-runtime:documentation:getting-started:
+#+AI_TAG: ai_961aa1aac0a0d527
+#+FILETAGS: :ai:ai_961aa1aac0a0d527:agentprolog:prolog-runtime:documentation:getting-started:
 
 #+PROPERTY: header-args :eval never-export
 
@@ -141,7 +141,10 @@ If you do not have authorized provider access, stop after configuration inspecti
 | =/inspect= | Render the current canonical view, tools, approvals, evidence and usage |
 | =/create= / =/select= | Initialize/select or refresh the configured session; not an interactive workspace picker |
 | =/answer ID TEXT= | Answer the exact pending question |
+| =/answer= (bare) | Reopen the newest pending question as a numbered selection menu |
+| =/answer list= | List all questions and pending approvals; answered ones are read-only history |
 | =/approve ID DECISION= | Submit an offered decision for an exact pending approval |
+| =/approve= (bare) | Reopen the newest pending approval as a numbered choice menu |
 | =/report-bug [TEXT]= | Start one AI bug-intake interview turn; answer its questions with =/answer= |
 | =/cancel= | Request cancellation of the current run |
 | =/reconnect= | Restart the connection/sidecar and obtain its checkpoint |
@@ -149,6 +152,8 @@ If you do not have authorized provider access, stop after configuration inspecti
 | =/quit= | Close the sidecar and exit |
 
 =/inspect= renders the local canonical view; it is not a shell command or an extra artifact verifier. =/reconnect= is not the same as =/resume=: resuming can repeat an objective and incur additional provider use. A pending native operation is not silently replayed after a process restart.
+
+Menus: bare =/answer= reopens the newest pending question even if earlier output scrolled it away; =/answer list= shows every question (pending and answered) plus pending approvals, and a number opens that item. Numbered selections submit immediately; free text is the answer when a question has no choices. Answered questions are read-only history — the run already consumed the answer, so correct it with a follow-up objective. =/back= leaves any menu without sending.
 
 * When a tool needs approval
 
