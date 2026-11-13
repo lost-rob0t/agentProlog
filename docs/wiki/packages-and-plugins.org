@@ -1,0 +1,251 @@
+:PROPERTIES:
+:ID: 6937caf5-e9f0-4872-ab56-d62dd9c8a2ef
+:END:
+#+TITLE: Local packages and trusted plugins
+#+CREATED: [2026-11-12 Thu 22:08]
+#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: documentation
+#+ROAM_VISIBILITY: private
+#+CENSOR_PROFILE: strict
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:07723d512707a094f63f82554ad21cb54c2e3e20d30236ff8ac7f6faffffd39e; repository target docs/wiki/packages-and-plugins.org; source links in body
+#+AI_GENERATED: t
+#+AI_TAG: ai_f666a434c8ac8717
+#+FILETAGS: :ai:ai_f666a434c8ac8717:agentprolog:prolog-runtime:documentation:packages-and-plugins:
+
+#+PROPERTY: header-args :eval never-export
+
+* Choose data or executable code deliberately
+
+Use [[file:skills.org][native skill files]] for inert model guidance. Use a plugin when an operator
+needs executable configuration, native tool handlers, hooks, or trusted provider
+callbacks. A local package composes the same executable configuration using
+ordinary SWI-Prolog pack layout; it is not a different extension runtime.
+
+=--plugin FILE=, =--package DIR=, =--config FILE=, and =--trust-project= authorize
+local Prolog execution in their respective configuration sources. They are not
+sandbox switches. Reviewing a plugin's returned dict is insufficient: directives,
+imports, and other consulted code can already have effects. Never derive these
+trust choices from model output. Use a separate sidecar process per project.
+
+Tool capabilities, budgets, schema checks, and approval constrain runtime tool
+use. They do not make arbitrary consulted Prolog safe.
+
+* Minimal executable plugin
+
+Save =review-plugin.pl= outside or inside the project, as appropriate for your
+operator-owned configuration:
+
+#+begin_src prolog
+:- module(my_review_plugin,[agentprolog_config/1]).
+
+agentprolog_config(_{
+    profile:review,
+    runtime_options:[system_prompt("Review supplied evidence. Distinguish verified results from assumptions.")]
+}).
+#+end_src
+
+From the AgentProlog checkout:
+
+#+begin_src sh
+nix run . -- --project /absolute/path/to/project \
+  --plugin /absolute/path/to/review-plugin.pl
+#+end_src
+
+This trusts that file. It does not silently trust an existing
+=PROJECT/.agentprolog/config.pl=: the loader rejects that file unless the
+operator separately supplies =--trust-project=.
+
+The first term of a product plugin must be a module declaration exporting
+=agentprolog_config/1=. The predicate must yield exactly one configuration
+dict. Its evaluation is bounded by five seconds, but consultation itself is
+executable and is not made safe by that evaluation deadline.
+
+* A complete native tool plugin
+
+The checked-in [[file:../../examples/plugins/word_count.pl][word-count plugin]] has this shape:
+
+#+begin_src prolog
+:- module(my_word_count_plugin,[agentprolog_config/1,count_words/2]).
+
+agentprolog_config(_{
+    profile:word_count,
+    tools:[tool(tool_schema{
+        name:word_count,
+        description:"Count whitespace-separated words in supplied text",
+        capability:tool(word_count),
+        effect:read,
+        arguments:_{type:object,properties:_{text:_{type:string}},
+                    required:[text],additional_properties:false},
+        result:_{type:object,properties:_{count:_{type:integer}},
+                 required:[count],additional_properties:false},
+        limits:_{time_limit:0.5,max_output_bytes:1024}
+    },my_word_count_plugin:count_words)],
+    capabilities:[tool(word_count),context(peek)]
+}).
+
+count_words(Args,_{count:Count}) :-
+    split_string(Args.text," \t\r\n"," \t\r\n",Words),
+    length(Words,Count).
+#+end_src
+
+Use module-qualified, ground callable handlers. Native preflight/execute pairs
+can instead use =tool_handler(Module:Preflight,Module:Execute)=. This is runtime
+tool registration, not a new loop or shell bridge.
+
+Loading a plugin that requests capabilities requires matching operator grants:
+
+#+begin_src sh
+nix run . -- --project /absolute/path/to/project \
+  --plugin /absolute/path/to/my-word-count-plugin.pl \
+  --allow-tool word_count --allow-context peek
+#+end_src
+
+A grant permits the configuration to request a capability; it does not create
+the tool or guarantee it will be selected. A plugin cannot grant itself
+=tool(word_count)=. Without the operator grant, configuration loading rejects
+it. The =context(peek)= capability supports inspecting runtime tool-result
+aliases; the plugin's handler still returns an ordinary typed result.
+
+For full option/layer semantics, see [[file:configuration-reference.org][Configuration reference]].
+For examples combining providers, grants, and agents, see
+[[file:configuration-cookbook.org][Configuration cookbook]].
+
+* Ordinary SWI-Prolog pack layout
+
+A small local pack can contain:
+
+#+begin_example
+my-agent-pack/
+  pack.pl
+  prolog/
+    agentprolog_plugin.pl
+  skills/
+    checklist.pl
+#+end_example
+
+=pack.pl= uses ordinary SWI pack metadata. Put =name(Atom).= first, because
+AgentProlog reads that first term to obtain the package identity:
+
+#+begin_src prolog
+name(my_agent_pack).
+version('0.1.0').
+title('Local review agent configuration').
+author('Local operator','').
+#+end_src
+
+=prolog/agentprolog_plugin.pl= is executable and exports the same entrypoint:
+
+#+begin_src prolog
+:- module(my_agent_pack_configuration,[agentprolog_config/1]).
+
+agentprolog_config(_{
+    profile:review,
+    skill_files:['../skills/checklist.pl'],
+    agents:_{reviewer:_{
+        selected_skills:[checklist],
+        runtime_options:[system_prompt("Review evidence; never invent test outcomes.")]
+    }},
+    default_agent:reviewer
+}).
+#+end_src
+
+=skills/checklist.pl= is inert data:
+
+#+begin_src prolog
+agentprolog_skills([
+    prompt_unit{
+        unit:skill(checklist),
+        description:"Review acceptance evidence",
+        content:"Compare every requirement with observed evidence. Report gaps."
+    }
+]).
+#+end_src
+
+Launch this explicitly trusted local pack:
+
+#+begin_src sh
+nix run . -- --project /absolute/path/to/project \
+  --package /absolute/path/to/my-agent-pack --agent reviewer
+#+end_src
+
+The loader resolves the local root, reads =pack.pl=, checks duplicate names,
+calls =pack_attach(Root,[search(first)])=, and loads
+=ROOT/prolog/agentprolog_plugin.pl=. Skill paths are relative to this entrypoint
+file. SWI library-path attachment is process state, another reason to keep
+project sidecars isolated.
+
+There is no AgentProlog online package search, download/install command,
+dependency resolver, lockfile generator, automatic upgrade, or invented custom
+manifest here. Do not substitute a guessed =agentprolog.json= or expert
+descriptor. An ordinary local =pack.pl= and the explicit entrypoint are the
+implemented interface. Review any transitive code the executable pack loads.
+
+The bundled [[file:../../examples/packs/coding/pack.pl][coding pack]] demonstrates this arrangement with
+[[file:../../examples/packs/coding/prolog/agentprolog_plugin.pl][builder/reviewer configuration]] and
+[[file:../../examples/packs/coding/skills/build-todo.pl][an inert build-todo skill]]. Its builder instructions describe behavior;
+the pack does not itself provide workspace tools or grant their capabilities.
+Compose the appropriate trusted tool configuration and operator grants if those
+tools are needed. The reviewer requests =context(peek)=, which must already be
+allowed by the merged parent configuration as well as the operator grant.
+
+* Layering, identities, and provenance
+
+Plugin and package entrypoint layers follow their option order; trusted project
+configuration comes after them. Named-agent selection is then applied. Runtime
+options merge by key, tool and skill-file lists append, and =selected_skills=
+is replaced by the later layer rather than concatenated. Agents may narrow,
+not expand, the merged parent capability set and budget.
+
+| Identity | Rejection rather than silent replacement |
+|----------+------------------------------------------|
+| Package =name/1= | =duplicate_package(Name)= across supplied packages |
+| Resolved source file | =duplicate_source= if the same source occurs twice |
+| Module name | =module_conflict(Module,Existing,Path)= across different sources |
+| Reserved/preexisting module | =reserved_module(Module)= |
+| Registered tool name | =duplicate_tool_name= |
+| Named agent | =duplicate_agent(Name)= |
+| Native skill identity | =duplicate_skill= (or compiler duplicate error) |
+
+Module/source association is retained in process-local =known_source/2= even
+after some failures. Reusing the same module name at another path is not an
+extension override mechanism. Give each executable source a distinct module
+name and restart the sidecar intentionally when changing project composition.
+
+=Config.sources= records executable configuration sources, local pack metadata,
+an operator config file when used, and selected native skill-file paths. The
+session binds the normalized configuration and SHA-256 hashes of these sources
+to state. This is not a complete dependency lock: arbitrary helper modules or
+resources loaded transitively by trusted executable code are not automatically
+added to that source list.
+
+* Troubleshooting
+
+| Failure | What to inspect |
+|---------+-----------------|
+| =module_declaration_required(Path)= | Make the module declaration the first term and export the required entrypoint. |
+| =non_unique_configuration(Path)= | Return one dict, not zero or multiple solutions. |
+| =invalid_pack(Root)= | Ensure =pack.pl= exists and its first term is =name(an_atom).=. |
+| Missing package entrypoint | Supply =prolog/agentprolog_plugin.pl=, not just =pack.pl=. |
+| =duplicate_package(Name)= | Use distinct pack identities; listing one pack twice is also a duplicate. |
+| =module_conflict(...)= | Avoid the same module identity at multiple paths; do not silently unload unrelated code. |
+| =capability_not_granted(Cap)= | Add an intentional operator grant, or remove the capability request. |
+| =capability_without_tool(Name)= | Register the matching tool; a grant alone cannot implement it. |
+| =agent_capability_expansion(Cap)= | Allow the capability in the parent configuration before a named agent can retain it. |
+| =untrusted_project(Path)= | Review the project file and explicitly trust it, or use a project without that file. |
+| =session_configuration_mismatch= | Use separate state for intentionally different configuration instead of reusing incompatible state. |
+
+On a failed layer load, AgentProlog attempts to unload that source. This is
+cleanup, not rollback of arbitrary side effects executed during consultation.
+Unknown configuration keys and unsupported runtime options are rejected; do
+not hide authority or registry settings inside =runtime_options=.
+
+* Sources and related pages
+
+- [[file:../../prolog/agentprolog_config.pl][Package attachment, module admission, layer validation, and merges]].
+- [[file:../../prolog/agentprolog_session.pl][CLI options and persistent configuration identity]].
+- [[file:../../test/agentprolog_config_test.pl][Trust, capability, precedence, duplicate-tool, and module-conflict tests]].
+- [[file:../../test/agentprolog_agents_test.pl][Local pack loading, duplicate package names, and named-agent narrowing tests]].
+- [[file:../../packages/conversation-ui/src/cli.js][Supported CLI flags and sidecar boundary]].
+- [[file:../../flake.nix][Packaging and pinned upstream runtime]].
+- [[file:agents.org][Agents]], [[file:skills.org][Skills]], [[file:scripting.org][Scripting]], [[file:Home.org][Wiki home]].

@@ -1,0 +1,269 @@
+:PROPERTIES:
+:ID: 1f1193b5-56a4-446a-ad09-1169fc4dd856
+:END:
+#+TITLE: Scripting AgentProlog
+#+CREATED: [2026-11-12 Thu 22:08]
+#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: documentation
+#+ROAM_VISIBILITY: private
+#+CENSOR_PROFILE: strict
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:2842f4c6c73ded1e5457d9bd16cc77b7113dbf4b4f3a873f59c75e2c9b455ec8; repository target docs/wiki/scripting.org; source links in body
+#+AI_GENERATED: t
+#+AI_TAG: ai_8cdd3d35aae0bed7
+#+FILETAGS: :ai:ai_8cdd3d35aae0bed7:agentprolog:prolog-runtime:documentation:scripting:
+
+#+PROPERTY: header-args :eval never-export
+
+* Choose the right boundary
+
+The product =agentProlog= command is interactive. It has no =--json=,
+=--headless=, or =--objective= flag. Piping lines into its stdin is not a
+supported reliable headless protocol: line handlers and EOF can overlap runtime
+startup and teardown. The =--objective= option below belongs only to the example
+script, not to the product CLI.
+
+| Surface | Intended caller | Ownership and limits |
+|---------+-----------------+----------------------|
+| Interactive =agentProlog= CLI | Human operator | Renders the canonical session; slash commands are UI commands. |
+| Exported JavaScript =Client= | Checkout-local integrations | Spawns an explicit executable without a shell, negotiates, validates and projects canonical frames. |
+| =prolog_agent_ui_v1= wire | Compatible adapters | Newline-delimited JSON with negotiation, correlated requests/results, snapshots and sequenced events; not arbitrary RPC. |
+| Trusted local Prolog configuration/API | Operator or host author | Executes local Prolog code; not a sandbox and not model-supplied scripting. |
+| Native =agentprolog_skills(...)= file | Skill loader | Read as inert terms and compiler-validated; never consulted as executable Prolog. |
+
+The example programs are small consumers of
+[[file:../../packages/conversation-ui/src/client.js][the exported Client]], not another agent loop, provider implementation, tool
+executor or shell bridge. The runtime remains the sole execution and permission
+authority. These examples assume a source checkout and Node.js 22 or newer; they
+do not claim an installed, stable npm SDK. Imports are relative to the scripts,
+so invoking an absolute script path from a different working directory works.
+
+See [[file:../../packages/conversation-ui/src/projection.js][the canonical projection and frame validation]],
+[[file:../../packages/conversation-ui/src/cli.js][the interactive UI]], and
+[[file:../../prolog/agentprolog_session.pl][the native host argument parser and command dispatch]].
+
+* Explicit inputs and native launch shape
+
+The native launcher takes positional =STATE_DIRECTORY PROJECT= followed by
+operator flags, including =--config FILE=. The examples require all four of
+executable, project, state and config; they do not infer an executable or state
+directory from ambient environment variables. The state may be new; project and
+config must exist. Config is executable trusted Prolog, not a JSON settings file.
+
+#+begin_src sh
+# Run from the checkout root. Building does not perform a model request.
+session_store=$(nix build --no-link --print-out-paths .#session-host)
+session_executable="$session_store/bin/agentprolog-session"
+
+# Set these to actual operator-reviewed locations; no implicit project trust.
+project=/absolute/path/to/project
+state=/absolute/path/to/dedicated/session-state
+config=/absolute/path/to/operator.pl
+
+node examples/scripts/inspect-session.mjs \
+  --executable "$session_executable" \
+  --project "$project" --state "$state" --config "$config"
+#+end_src
+
+Use a dedicated state directory for each project/configuration combination.
+The runtime owns its state lock and configuration binding; these examples do not
+bypass either. They launch and later terminate their own native host. Starting a
+host can create state or mark a previously running session interrupted. Even
+the inspection example is not a read-only offline file viewer, and must not be
+pointed at a state directory currently owned by another host.
+
+For a minimal provider-free inspection, an operator can deliberately create a
+trusted file with this content and select a project without a project config:
+
+#+begin_src prolog
+:- module(example_inspection_operator, [agentprolog_options/1]).
+agentprolog_options([]).
+#+end_src
+
+This grants no tools or provider. It is sufficient for startup/inspection, not a
+promise that task submission will complete. If a project has
+=.agentprolog/config.pl=, runtime startup rejects it unless the operator
+explicitly authorizes =trusted_project(true)= in reviewed operator options.
+Neither example adds that trust or any tool/model grant on the caller's behalf.
+
+When using a checkout-based SWI launcher instead of the packaged session host,
+prefix arguments can be passed explicitly. Each occurrence is exactly one argv
+element; arguments are not interpolated as shell code:
+
+#+begin_src sh
+# pinned_swipl must expose the pinned Prolog-RLM libraries.
+pinned_swipl=/absolute/path/to/pinned/prolog-rlm-swipl
+checkout=/absolute/path/to/AgentProlog
+node "$checkout/examples/scripts/inspect-session.mjs" \
+  --executable "$pinned_swipl" \
+  --executable-arg -q \
+  --executable-arg -s \
+  --executable-arg "$checkout/prolog/agentprolog_session.pl" \
+  --executable-arg -- \
+  --project "$project" --state "$state" --config "$config"
+#+end_src
+
+* Example 1: inspect a canonical checkpoint
+
+[[file:../../examples/scripts/inspect-session.mjs][inspect-session.mjs]] calls =connect()=, waits for both negotiation and a
+canonical snapshot, prints one JSON object and closes the child in =finally=.
+It submits no task and issues no approval decision. Its output has =status:
+"inspected"=, the negotiated =descriptor=, =session_id=, =at_seq=, and canonical
+=state=. Events already received may advance the checkpoint before printing;
+this is not a guarantee that the session remains unchanged afterward.
+
+Connection/request errors exit 1; malformed local arguments exit 2. SIGINT and
+SIGTERM close the child and exit 130 and 143 respectively. Diagnostics from the
+child are not copied to stdout; stdout is reserved for one script result.
+
+#+begin_src sh
+node examples/scripts/inspect-session.mjs --help
+#+end_src
+
+* Example 2: submit exactly one bounded task
+
+[[file:../../examples/scripts/submit-task.mjs][submit-task.mjs]] uses the same explicit connection inputs and sends one
+=session.turn= with an objective. It listens before submitting, so even a run
+that finishes before the command acknowledgement is not missed. An old run's
+terminal checkpoint is not treated as completion of the new objective.
+
+#+begin_src sh
+node examples/scripts/submit-task.mjs \
+  --executable "$session_executable" \
+  --project "$project" --state "$state" --config "$config" \
+  --objective 'Inspect the configured project using only its authorized tools.' \
+  --request-timeout-ms 5000 --wait-ms 30000
+#+end_src
+
+This may invoke the provider and tools selected by the reviewed configuration.
+An objective is not a grant. Review capabilities and runtime budgets before
+running it; a descriptive objective does not enforce read-only behavior.
+
+| Script status | Exit | Meaning |
+|---------------+------+---------|
+| =finished= with runtime =outcome.status= of =complete= | 0 | Canonical terminal outcome; not independent proof the requested artifact works. |
+| =finished= with any other runtime outcome | 1 | Canonical non-success terminal outcome, preserved in output. |
+| =error= | 1 | Transport/protocol/command failure; after submission effects may be uncertain. |
+| =invalid_arguments= | 2 | Local validation failed before opening the runtime. |
+| =busy= | 3 | Existing active run or pending interaction; no turn submitted. |
+| =blocked= | 3 | Pending native approval or question observed; included in output and never answered. |
+| =timeout= | 4 | Observation deadline reached; not proof the task failed or made no changes. |
+| =cancelled= | 130/143 | SIGINT/SIGTERM; best-effort native cancellation and close. |
+
+Pending approvals/questions are explicit outcomes. The example never sends
+=approval.decide= or =question.answer=, never chooses =allow_once= or a session
+grant, and never retries =session.turn= or automatically resumes an objective.
+For its submitted turn, blocked/deadline/signal outcomes request
+=session.cancel=, allow at most 1000 ms of cancellation-request grace, and then
+close the host. The =cancellation= field distinguishes =acknowledged=,
+=unconfirmed= and =unavailable=. An acknowledgement is not confirmation that
+every operation stopped or was rolled back. The returned checkpoint is captured
+before this cleanup so the originally observed block/deadline is retained.
+This is a fail-closed batch example, not an attachment to a long-lived session
+that leaves approvals pending for another UI.
+
+The wait deadline starts after connecting and immediately before submission.
+Connection negotiation and snapshot waiting each have their own bounded
+request timeout; close may take an additional second to escalate SIGTERM to
+SIGKILL. Thus =--wait-ms= is not a whole-process wall-clock SLA. Runtime budgets
+remain separate and must cap calls, tokens, effects and cost. Interrupting the
+local process does not imply a provider request was free or remotely cancelled.
+
+After an uncertain mutation outcome, inspect canonical state, tool outcomes and
+effect records before deciding whether another submission is safe. Do not
+translate a timeout into an automatic retry.
+
+* Example 3: import and validate skill data without executing it
+
+[[file:../../examples/scripts/import-and-check-skill.sh][import-and-check-skill.sh]] wraps the native importer and
+[[file:../../examples/scripts/check-skill.pl][check-skill.pl]] validation entry point. It needs Bash, an explicit
+=agentprolog-import-skill= executable, and an explicit SWI executable with the
+pinned runtime libraries. Plain system SWI without those libraries is not an
+equivalent substitute.
+
+#+begin_src sh
+import_store=$(nix build --no-link --print-out-paths .#import-skill)
+# Supply the SWI launcher from the matching pinned Prolog-RLM runtime.
+pinned_swipl=/absolute/path/to/pinned/prolog-rlm-swipl
+checkout=/absolute/path/to/AgentProlog
+
+bash "$checkout/examples/scripts/import-and-check-skill.sh" \
+  --importer "$import_store/bin/agentprolog-import-skill" \
+  --swipl "$pinned_swipl" \
+  --source "$checkout/skills/markdown-to-prolog" \
+  --output /absolute/path/to/new-imported-skill.pl
+#+end_src
+
+All paths in this wrapper must be absolute. The output parent must already
+exist; an existing output file or symlink is refused. Arguments remain quoted
+argv elements, including paths containing spaces or apostrophes. Import and
+validation failures propagate a nonzero exit; a file created by a successful
+import is retained if later validation fails, for inspection rather than silent
+deletion. This wrapper does not impose a time limit on trusted importer/SWI
+executables; bound them externally if your job runner requires that.
+
+The generated file is passed as an argv value to a fixed validation program.
+It is read through =load_skill_units/2=, not =consult/1= or a dynamically
+constructed Prolog goal. Successful validation checks native data and compiler
+admission; it does not load it into a session, activate a skill, select a
+provider, grant capabilities or prove the skill's advice correct. No project,
+session state, provider credential or accounting context is needed for this
+data conversion.
+
+* Library API, wire frames and trusted Prolog are not interchangeable
+
+The JavaScript API accepts an executable and argv, then exposes =connect()=,
+=command(name, payload)=, =close()=, =descriptor= and =view=. A successful
+command acknowledgement is not a terminal run outcome. The =view= is a
+disposable validated projection of runtime-owned state, not the state authority.
+Reconnect supplies a fresh canonical checkpoint; duplicate events are ignored,
+whereas sequence gaps and malformed frames fail closed.
+
+At the wire boundary the runtime validates the negotiated protocol, session and
+request identifiers and admitted command payloads. The Client owns correlation
+and sequencing; these examples deliberately do not handcraft a second protocol
+implementation. Sending arbitrary executable code or configuration through a
+wire payload is not a supported extension mechanism. Adapters must not infer
+permissions from a model's text or turn UI rendering into a tool executor.
+
+At the trusted host boundary, operator config, plugin modules and packages may
+execute arbitrary local Prolog. They require operator trust and are not made
+safe merely by validation of configuration keys. Keep executable paths, source
+selection, capability grants and credentials outside model control. Native
+skill terms are a separate data boundary and confer no such trust.
+
+* Machine outcomes, credentials and accounting
+
+- Runtime snapshots, tool outcomes, verification events and effect records are
+  machine observations. Assistant prose saying "done" or "tests passed" is
+  not equivalent evidence. Even canonical =complete= needs independent tests
+  of the requested artifact when correctness matters.
+- These scripts do not read, print or create credentials. However, the native
+  child inherits the invoking process environment. Only provide credentials
+  authorized for that particular configuration/provider; an explicit executable
+  is trusted executable code, not a security sandbox.
+- Canonical state may contain project contents, objective text and tool output.
+  JSON checkpoints and captured blocked questions should be treated as private
+  artifacts; lack of credential logging is not a promise that arbitrary model
+  or tool text contains no sensitive data.
+- Preserve =state.usage= and provider trace evidence. Tokens, calls and known
+  dollar cost are different accounting dimensions. Missing/unknown cost is not
+  zero; do not invent a dollar total or assume a timeout avoided billing.
+- Close credential-bearing generation processes before independently executing
+  generated code in an appropriately isolated environment. The examples do not
+  automatically execute generated code or authorize an external shell command.
+
+* Deterministic checks and scope of evidence
+
+#+begin_src sh
+node --test packages/conversation-ui/test/documented-scripts.test.js
+#+end_src
+
+[[file:../../packages/conversation-ui/test/documented-scripts.test.js][The tests]] run =--help= and argument validation; execute the real Client
+against the existing adversarial transport fixture and deterministic subprocess
+hosts; and check completion, non-success outcomes, blocking approvals/questions,
+old checkpoints, timeouts, cancellation, command rejection, malformed transport,
+exact native argv and child teardown. Shell command doubles check quoting,
+inert-loader invocation and no-overwrite behavior. Test subprocess environments
+do not inherit provider credentials. The tests do not make a model call and do
+not claim real-provider or native-runtime acceptance from mock behavior.

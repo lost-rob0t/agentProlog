@@ -1,0 +1,53 @@
+:PROPERTIES:
+:ID: ac3a97cb-b3fa-41e1-9cf6-2b5c56f7912c
+:END:
+#+TITLE: AgentProlog historical migration matrix
+#+CREATED: [2026-11-12 Thu 22:08]
+#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: documentation
+#+ROAM_VISIBILITY: private
+#+CENSOR_PROFILE: strict
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:ceabc5e43e3ad0488519bdcb2a289ffc396e6bb5f3f30642867663d79a282794; repository target docs/migration-matrix.org; source links in body
+#+AI_GENERATED: t
+#+AI_TAG: ai_390e5b973901552f
+#+FILETAGS: :ai:ai_390e5b973901552f:agentprolog:prolog-runtime:documentation:legacy-migration-matrix:
+
+#+PROPERTY: header-args :eval never-export
+
+* Reference status
+
+This implementation note was migrated to Org; use [[file:wiki/Home.org][the wiki]] for the complete guide. Historical status is explicitly labeled below.
+
+This is a historical migration plan, not a list of current blockers or implemented renderers. The nested product harness was removed upstream; AgentProlog is a standalone downstream application. The pinned package and generic session host exist in this checkout. See [[file:wiki/architecture.org][current architecture]].
+
+| Concern | Existing nested harness / upstream surface | Standalone target | Migration action |
+|---+---+---+---|
+| runtime ownership | =prolog-rlm= public =library(rlm)= facade | pinned flake/SWI dependency | REUSE VIA PROLOG-RLM API |
+| provider/model execution | generic provider/completion runtime in =prolog-rlm= | product selects/routes through public runtime | REUSE VIA PROLOG-RLM API |
+| async/Futures | generic runtime concern | no downstream scheduler | KEEP CORE |
+| authority | generic authority mediation | product projects requests only | KEEP CORE |
+| effects | generic durable-effect semantics | coding tools cross upstream effect boundary | KEEP CORE |
+| Spec/Plan/Verify | generic workflow primitives | one headless coding workflow composes them | REUSE VIA PROLOG-RLM API |
+| project/source KB | reusable project/source knowledge | coding workflow consumes public APIs | REUSE VIA PROLOG-RLM API |
+| coding tools | nested product tools + external tool-loader seam | downstream filesystem/Git/process/test packs | MIGRATE / REIMPLEMENT DOWNSTREAM |
+| frontend protocol | =prolog_agent_ui_v1=, NDJSON fixtures, replay/correlation semantics | renderer-independent product client contract | REUSE VIA PROLOG-RLM API; migrate only product adapter |
+| UI/TUI | nested/reference client work | Bubble Tea default frontend plugin | MIGRATE / REIMPLEMENT DOWNSTREAM |
+| configuration | upstream trusted runtime config is not package loading | downstream product defaults + upstream config APIs | SPLIT: KEEP CORE semantics, product UX downstream |
+| persistence | generic runtime/session concern | client renders/reconnects; does not own truth | KEEP CORE |
+| MCP | generic runtime concern | product configuration/UX only | KEEP CORE |
+| traces/usage/subagents | generic structured runtime events | frontend/headless projections | REUSE VIA PROLOG-RLM API |
+| tests/fixtures | upstream deterministic runtime/protocol fixtures | downstream conformance against public contract | REUSE + ADD DOWNSTREAM CONFORMANCE |
+| packaging | upstream SWI pack; flake output required by #141 | standalone flake consumes pinned upstream package | BLOCKED ON #141 FLAKE OUTPUT |
+
+* Historical packaging blocker (resolved)
+
+The original blocker was absence of =prolog-rlm.packages.${system}.default=. That output is present in the pinned dependency now consumed by =flake.nix=. Preserve the ownership boundary: do not copy the generic runtime downstream. Historical Bubble Tea plans below do not describe the implemented canonical Node terminal client.
+
+* Historical planned downstream slices
+
+1. lock the flake input and prove =nix flake check=, =nix build=, and =nix run= from a clean checkout;
+2. replace the readiness stub with the first headless Spec/Plan/Execute/Verify product entrypoint over public runtime APIs;
+3. migrate/adapt renderer-side =prolog_agent_ui_v1= fixtures without moving authority/execution into the frontend;
+4. add confined coding tool packs through =rlm_tool_loader= after auditing its current safety contract;
+5. implement the Bubble Tea renderer as a client of the same headless workflow.

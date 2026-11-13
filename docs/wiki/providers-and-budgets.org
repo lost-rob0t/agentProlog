@@ -1,0 +1,186 @@
+:PROPERTIES:
+:ID: 08d0e83c-d8bb-4d39-9a59-f1b3999c65ea
+:END:
+#+TITLE: Providers and budgets
+#+CREATED: [2026-11-12 Thu 22:08]
+#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: documentation
+#+ROAM_VISIBILITY: private
+#+CENSOR_PROFILE: strict
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:3b43ee736552ed8dbe7863d3ae8b324ab2347db080aa3551f565374621b48b8c; repository target docs/wiki/providers-and-budgets.org; source links in body
+#+AI_GENERATED: t
+#+AI_TAG: ai_4c618c4cf76ba430
+#+FILETAGS: :ai:ai_4c618c4cf76ba430:agentprolog:prolog-runtime:documentation:providers-and-budgets:
+
+#+PROPERTY: header-args :eval never-export
+
+* Provider configuration stays upstream
+
+AgentProlog configures the canonical Prolog-RLM provider boundary; it does not implement a second transport, retry loop or billing system. Product settings carry native provider descriptors through the closed =runtime_options= whitelist. The loader accepting a descriptor is not proof of model availability, endpoint authorization, quota or a successful request.
+
+Keep credentials as environment references. Never place resolved secret strings in Prolog files, operator options, objectives, tool arguments, session events or examples. No provider call is necessary to inspect configuration or run deterministic configuration tests.
+
+* Configure an OpenRouter provider
+
+Use the upstream constructor in explicitly trusted product configuration:
+
+#+begin_src prolog
+:- module(my_openrouter_settings, [agentprolog_config/1]).
+:- use_module(library(rlm_chain), []).
+
+agentprolog_config(_{
+    mode:direct,
+    runtime_options:[provider(Provider),provider_name(openrouter)],
+    budget:_{max_model_calls:3, max_total_tokens:8000,
+             max_cost_usd:0.04, time_limit:60.0}
+}) :-
+    rlm_chain:openrouter_provider('openrouter/free', Provider).
+#+end_src
+
+The constructor uses =credential(env('OPENROUTER_API_KEY'))= and the native OpenRouter chat-completions endpoint. A free-route model name is not a guarantee of availability or an authorization to spend. An operator should explicitly approve the provider/model and obtain credentials through their existing credential mechanism before submitting a real objective. This page deliberately contains no secret assignment command.
+
+With no explicit provider, the pinned runtime resolves its OpenRouter default: nonempty =OPENROUTER_TEST_MODEL= when set, otherwise ='openrouter/free'=. That environment variable is a model selector, not a credential or a product runtime option. Prefer an explicit provider model for reproducible use; inherited environment can change a default route.
+
+* Other native provider descriptors
+
+The upstream generic constructor accepts an endpoint, credential reference and model. For example, the following fragment describes an operator-managed local service; it is not an assertion that the endpoint exists:
+
+#+begin_src prolog
+rlm_chain:openai_compatible_provider(
+    'http://127.0.0.1:8080/v1/chat/completions',
+    env('AGENTPROLOG_MODEL_API_KEY'),
+    'operator-selected-model',
+    Provider).
+#+end_src
+
+Use the resulting =provider(Provider)= and matching =provider_name(openai_compatible)= in the product runtime list. =none= is the upstream credential form for a service that intentionally requires no credential; do not substitute it for a required credential after a failure. Credentials are resolved by native transport, not expanded into configuration by AgentProlog.
+
+The checked-in live workspace acceptance fixture uses:
+
+#+begin_src prolog
+rlm_chain:zai_coding_provider(chat_completions, 'glm-5.3-flash', Provider).
+#+end_src
+
+That path uses =credential(env('ZAI_API_KEY'))=, provider identity =zai_coding= and the Z.AI Coding chat-completions endpoint. It does not fall back to a standard/pay-as-you-go endpoint. This fixture is opt-in acceptance code, not an always-on application default or blanket authorization for future calls. See [[file:development-and-testing.org][Development and testing]] for the separate live gates.
+
+Provider-specific protocol support belongs to the pinned runtime. Do not assume that any descriptor accepted by the shallow configuration validator supports every direct tool-calling/streaming path. Verify the selected upstream adapter and intended billing/account type independently. There is no =--provider=, =--model= or =--api-key= flag in the bundled conversation CLI.
+
+* Provider identity, mode and callbacks
+
+| Setting | Meaning |
+|---------+---------|
+| =provider(Provider)= | Native descriptor with model, endpoint and credential references |
+| =provider_name(Name)= | Runtime route/capability identity, not the model identifier |
+| =mode:direct= | Canonical direct provider tool-calling loop; default execution mode |
+| =mode:rlm= | Canonical completion planner and typed-plan execution |
+| =model_handler(Module:Closure)= | Trusted =call(Closure,Request,Outcome)= callback for direct/nested model I/O |
+| =planner_handler(Module:Closure)= | Trusted root-planner callback for RLM mode |
+| =planner_max_tokens(N)= | Positive per-request planner/model output token limit; upstream default 1024 |
+| =prompt_compile_mode(compiled)= | Default upstream tool-schema projection |
+| =prompt_compile_mode(all_tools)= | Explicit broader tool-schema projection, still capability-filtered and bounded |
+
+For RLM mode, request =model(Name)= in the product's =capabilities= and grant it in operator =allowed_capabilities=, or use the matching =--allow-model NAME= ceiling flag. Keep =Name= consistent with =provider_name(Name)=. The loader does not infer that capability from the provider descriptor. Native child-capability validation can reject an RLM configuration lacking the matching model capability even before useful planning occurs.
+
+Direct mode can perform its ordinary model completion with an empty capability list; =model(Name)= is not an on/off switch for all provider access. Tool and context operations still need their effective capabilities. An operator approving a direct provider configuration is authorizing a potential model route, not just a named capability list.
+
+Callbacks are executable trusted code, not wire/model options. Deterministic tests use them without live transport and must not be represented as live model evidence. They must return the upstream normalized request/outcome contract, not arbitrary text. Successful loader validation checks qualification/groundness, not that callback implementation exists or will succeed.
+
+There is no standalone =model= product key and no =model/1= product runtime option. Change the model within the native provider descriptor. Arbitrary upstream options, including =temperature/1= or =child_capabilities/1=, do not become valid AgentProlog product options merely because upstream exports them. See [[file:configuration-reference.org][Configuration reference]].
+
+* Skills/system instructions and non-streaming projection
+
+When =skill_files= is empty and =system_prompt= is the empty string, the projection helper returns the configured runtime options unchanged. Otherwise it:
+
+1. Loads native inert prompt units and registers them with the canonical compiler alongside the tool registry.
+2. Registers nonempty trusted system instructions as mandatory instruction context, not as an executable skill.
+3. Requests explicit =selected_skills= and compiles with effective capabilities and a bounded context policy.
+4. Requires every explicitly selected skill to appear in the compiler's selected units.
+5. Renders the compiled context to a system message and prepends that message to each forwarded model/planner request through upstream provider callbacks.
+
+The projection context limit is =max(1,min(4096,max_total_tokens // 4))= tokens. Its policy uses no output reserve, no safety margin, no recent-turn minimum and =overflow:deny=. Too much mandatory context or a rejected explicit selection fails; it is not silently replaced with an unbounded prompt.
+
+These projected requests are deliberately non-streaming. The host installs model/planner callbacks, and suppresses the normal text-delta handler when either callback is present. Final text and usage still appear through session completion events. Ordinary unprojected turns retain the existing native streaming path where supported. A configured callback can also disable this host streaming path without skills.
+
+Configuring =selected_skills= alone, with no skill files and empty system instructions, does not trigger this projection path. Always supply the native skill document(s) containing the selected units. The list itself is not a skill registry, executable installer or permission grant. See [[file:skills.org][Skills]] and [[file:markdown-import.org][Markdown import]].
+
+* All budget defaults and accepted values
+
+The following is the complete AgentProlog default budget. Integer means a Prolog integer, not a numeric string or float. Only =time_limit= and =max_cost_usd= accept other numeric values.
+
+| Key | Default | Valid value | Native bound |
+|-----+---------+-------------+--------------|
+| =max_model_calls= | 8 | Positive integer | Model calls |
+| =max_tool_calls= | 16 | Nonnegative integer | Registered tool calls |
+| =max_iterations= | 16 | Positive integer | Execution iterations |
+| =max_total_tokens= | 32768 | Positive integer | Total accounted tokens |
+| =max_output_bytes= | 262144 | Positive integer | Bounded output bytes |
+| =max_recursion_depth= | 1 | Nonnegative integer | Native recursive depth |
+| =max_concurrent_subcalls= | 2 | Positive integer | Native concurrent subcalls where supported |
+| =max_context_ops= | 16 | Positive integer | Native context operations |
+| =max_native_calls_per_batch= | 8 | Positive integer | Native calls in one batch |
+| =time_limit= | 120.0 | Positive number | Native execution seconds |
+| =max_cost_usd= | 0.25 | Nonnegative number | Accounted provider cost in USD |
+
+Unknown keys fail during budget merging. Zero is allowed only for =max_tool_calls=, =max_recursion_depth= and =max_cost_usd=. A zero cost ceiling is not a guarantee of free provider access; it does not establish authorization, known pricing or provider-side enforcement. A recursion/concurrency ceiling does not enable a missing capability or spawn named agents.
+
+These are per-run native bounds. A new turn or =/resume= starts a new run; the generic session host does not maintain a lifetime/session-wide dollar reservation. Separate acceptance scripts can add cumulative rules, but those are not automatic product-budget semantics.
+
+* Operator ceilings versus product requests
+
+The loader calculates the budget in this order:
+
+1. Start from the complete default budget.
+2. Overlay operator =budget_ceiling(Dict)=. Supplied keys may raise or lower defaults; omitted keys retain defaults.
+3. Overlay =budget_limits(Dict)=, requiring every supplied value to be valid and no greater than its operator ceiling. The result is both the initial effective budget and the ceiling against which all product/project layers are checked.
+4. For each product layer, overlay =budget= keys within that effective operator ceiling.
+5. For the selected named agent, overlay its keys within the final merged parent's budget.
+
+Only the operator option list can contain =budget_ceiling/1= and =budget_limits/1=. Putting them in a product dict is an unknown-key error, and placing them in product =runtime_options= is unsupported.
+
+#+begin_src prolog
+:- module(my_budget_policy, [agentprolog_options/1]).
+
+agentprolog_options([
+    plugin('/approved/product.pl'),
+    budget_ceiling(_{max_model_calls:12, max_total_tokens:48000}),
+    budget_limits(_{max_cost_usd:0.05, time_limit:60.0})
+]).
+#+end_src
+
+Here the product starts with 12 calls and 48000 total tokens, but at most USD 0.05 and 60 seconds; all unmentioned keys retain their defaults. The product can choose fewer calls but cannot ask for 13 or USD 0.06.
+
+An ordinary layer may raise a previous layer's reduction back toward the operator ceiling: plugin requests two calls, project requests five, ceiling is eight, so five is valid. A selected agent with a parent budget of two cannot request five. Budget keys replace, not add: =max_model_calls:3= means a total bound of three for that run, not three extra calls.
+
+* Bounds are not billing guarantees
+
+Native accounting depends on provider-reported usage and available cost metadata. Missing cost is unknown, not zero. Request admission, retries, in-flight work, timeout boundaries and provider billing can differ from a local accounting limit. A =max_cost_usd= value is an additional runtime guard, not an enforceable card/account spending cap.
+
+Use provider-side limits and existing authorized quota when a hard billing boundary is required. Do not create an account, purchase quota, change credential type or silently select another billable route to make a run pass. Tool execution and arbitrary initialization in trusted configuration are not made safe or monetarily bounded merely by the model budget.
+
+The session host emits bounded usage on success, and preserves supplied usage from native dict failures before reporting failure. It does not expose raw exception/provider payloads to the UI: only known categorical failure fields cross that boundary. Requested and selected model fields remain separate when route metadata is available; configuration alone is not evidence of the actual provider/model used.
+
+* Troubleshooting provider and budget failures
+
+| Symptom | Check |
+|---------+-------|
+| Configuration fails before the UI starts | Unknown keys/options, invalid budget type/range, duplicate operator singletons, source trust and file/module paths |
+| =invalid_budget(Key,Value)= | Known key, allowed zero/positive type, operator limit and selected-agent parent bound |
+| RLM fails at capability setup | Product request and operator grant for =model(ProviderName)=; matching provider identity |
+| No incremental text with system instructions/skills | Expected non-streaming projected callback path; inspect final run outcome |
+| Explicit skill rejected | Native file present, unit name matches, compiler capability/activation/context policy admits it |
+| Provider fails despite valid config | Authorized endpoint/model, expected environment reference available to the host, adapter support and quota; do not print the credential |
+| Changing provider/agent cannot reopen state | Configuration binding changed; use a separate explicit state directory |
+| Cost absent | Treat as unknown; do not derive zero from missing metadata |
+
+See [[file:troubleshooting.org][Troubleshooting]], [[file:sessions-and-recovery.org][Sessions and recovery]], [[file:security-and-approvals.org][Security and approvals]] and [[file:configuration-cookbook.org][Configuration cookbook]].
+
+* Implementation and evidence
+
+- [[file:../../prolog/agentprolog_config.pl][Configuration defaults, whitelist and budget merge]].
+- [[file:../../prolog/agentprolog_prompt.pl][Compiler policy and non-streaming provider projection]].
+- [[file:../../prolog/agentprolog_session.pl][Mode selection, stream suppression, usage and safe failures]].
+- [[file:../../test/agentprolog_config_test.pl][Budget/grant tests]], [[file:../../test/agentprolog_agents_test.pl][Operator ceiling and agent narrowing tests]], [[file:../../test/agentprolog_skills_test.pl][Projected context tests]] and [[file:../../test/agentprolog_session_test.pl][Native deterministic execution tests]].
+- [[file:../../packages/conversation-ui/test/support/live_workspace_profile.pl][Opt-in Z.AI fixture]] and [[file:../../packages/conversation-ui/test/todo-app-acceptance.js][Bounded todo acceptance driver]]: inspect their explicit authorization and evidence requirements before any live run.
+- [[file:../../flake.nix][Runtime pin]]: provider constructors, runtime defaults and native semantics above were checked against its matching upstream source. Recheck when changing the pin.
+- [[file:Home.org][Wiki home]].

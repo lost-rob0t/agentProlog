@@ -1,0 +1,445 @@
+:PROPERTIES:
+:ID: 31d1676c-05c2-4606-a583-74a77ebea8b1
+:END:
+#+TITLE: Troubleshooting
+#+CREATED: [2026-11-12 Thu 22:08]
+#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: documentation
+#+ROAM_VISIBILITY: private
+#+CENSOR_PROFILE: strict
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:747084fe3121c36a3c5ef70a30838b391c0f31847327fc8f2565c62427cb1c0c; repository target docs/wiki/troubleshooting.org; source links in body
+#+AI_GENERATED: t
+#+AI_TAG: ai_99eeaeedc9eed1c1
+#+FILETAGS: :ai:ai_99eeaeedc9eed1c1:agentprolog:prolog-runtime:documentation:troubleshooting:
+
+#+PROPERTY: header-args :eval never-export
+#+description: Symptom-driven local diagnostics with fixes and explicit verification limits.
+
+[[file:Home.org][Wiki home]] | [[file:sessions-and-recovery.org][Sessions and recovery]] | [[file:security-and-approvals.org][Security and approvals]]
+
+* Diagnose without spending or exposing secrets
+
+Start with local checks. Commands on this page do not intentionally call a model
+unless explicitly described otherwise. Do not print environment variables,
+credentials, raw provider bodies or whole session checkpoints into an issue.
+The state can include objectives, tool contents and approval payloads.
+
+Run commands from the repository root. Set =PROLOG_RLM_SOURCE= to an existing
+checkout matching the pin; do not replace it with an arbitrary newer runtime.
+The names =STATE= and =ARTIFACT_DIR= below are operator-selected paths, not files
+to create in the source tree.
+
+#+begin_src sh
+node --version
+swipl --version
+node packages/conversation-ui/src/cli.js --help
+python3 -c 'import json; print(json.load(open("flake.lock"))["nodes"]["prolog-rlm"]["locked"]["rev"])'
+git -C "$PROLOG_RLM_SOURCE" rev-parse HEAD
+#+end_src
+
+At the documented base, the runtime pin is
+=4716ba8aa0bbf3fa1b96d80e8ed8e91d99973c85=. Repository pin files, not an older
+status paragraph, are authoritative. The deterministic gate below verifies the
+local runtime HEAD against =flake.nix= before running tests:
+
+#+begin_src sh
+bash scripts/check.sh "$PROLOG_RLM_SOURCE"
+#+end_src
+
+This runs synthetic model fixtures with real native tools/processes. It is not
+fresh-provider acceptance, browser automation or a production/remote deployment
+test. See [[file:../../scripts/check.sh][exact gate definition]].
+
+* Startup and configuration failures
+
+** CLI asks for a launcher or rejects external-adapter flags
+
+Symptom: “Run the packaged Nix application, set AGENTPROLOG_SESSION ...”, or
+“project/config flags require the bundled generic host.”
+
+Diagnostic:
+#+begin_src sh
+node packages/conversation-ui/src/cli.js --help
+command -v agentprolog-session
+#+end_src
+
+Fix: launch the packaged =nix run . -- --project /absolute/project=, or configure
+the existing generic host launcher using =AGENTPROLOG_SESSION=. For an external
+adapter use =--sidecar EXECUTABLE --sidecar-arg ARG= and its own contract, not
+bundled =--project=, =--state= or config flags. Check whether the launch environment
+selects =AGENTPROLOG_SIDECAR= without dumping its contents into logs.
+
+Verified limitation: shell command strings are not accepted as an argv shortcut;
+the client uses =spawn(..., shell:false)=. Running the packaged application only
+checks launch configuration until a turn is submitted; a turn may call a provider.
+
+Source: [[file:../../packages/conversation-ui/src/cli.js][launch validation]].
+
+** Untrusted project, malformed module or unexpected configuration answer
+
+Symptom: =untrusted_project=, =module_declaration_required=,
+=non_unique_configuration=, =non_unique_operator_options= or =missing_config_predicate=.
+
+Diagnostic (safe deterministic regression tests, not a consult of suspect code):
+#+begin_src sh
+swipl -q -p "library=$PROLOG_RLM_SOURCE/prolog" -s test/agentprolog_config_test.pl -g 'run_tests(agentprolog_config),halt'
+#+end_src
+
+Fix: review the source before authorizing it. Product/project modules must export
+=agentprolog_config/1= and return exactly one dict; operator modules must export
+=agentprolog_options/1= and return exactly one list. =--trust-project= is an
+explicit decision to execute local code, not an error-suppression flag. Correct
+the source, terminate the failed sidecar and restart a fresh process.
+
+Verified limitation: five-second predicate enumeration and failed-source unload
+do not roll back or sandbox arbitrary loading directives. Do not diagnose an
+untrusted file by consulting it speculatively.
+
+Sources: [[file:../../prolog/agentprolog_config.pl][loader]],
+[[file:../../test/agentprolog_config_test.pl][trust and cardinality tests]].
+
+** Duplicate options, modules, packs, tools, agents or skills
+
+Symptom: =duplicate_option=, =duplicate_source=, =module_conflict=,
+=reserved_module=, =duplicate_package=, =duplicate_tool_name=, =duplicate_agent=,
+=duplicate_capability=, =duplicate_runtime_option= or =duplicate_skill=.
+
+Diagnostic:
+#+begin_src sh
+rg -n 'agentprolog_options|agentprolog_config|module\(|name\(|unit:skill|skill_files|selected_skills' examples prolog test
+#+end_src
+
+Inspect the *reviewed* operator/plugin/pack paths in your own launch as well.
+Check overlapping =--config= and CLI single-valued options, repeated plugin/pack
+paths, reused module declarations across distinct sources, repeated =name(...)=
+pack identities, additive tool names and skills added by multiple layers.
+
+Fix: retain one intended declaration/source for each identity, use distinct
+module names for distinct files, remove duplicate grants/options and restart
+fresh. Give imported skills unique =skill(Name)= identities instead of loading
+the same collection twice. Conflicting single-valued CLI/operator options fail;
+they do not implement a “last one wins” override.
+
+Verified limitation: tools and =skill_files= are additive across layers. Module
+identity is process-global, and failed trusted initialization is not transactional.
+The loader deliberately refuses shadowing rather than guessing which duplicate
+was intended. Do not solve this by weakening duplicate checks.
+
+Sources: [[file:../../prolog/agentprolog_config.pl][identity admission and merging]],
+[[file:../../prolog/agentprolog_skills.pl][skill identity checks]].
+
+** Capability or budget failure before execution
+
+Symptom: =capability_not_granted=, =capability_without_tool=,
+=agent_capability_expansion=, =invalid_budget= or =unsupported_runtime_option=.
+
+Diagnostic:
+#+begin_src sh
+swipl -q -p "library=$PROLOG_RLM_SOURCE/prolog" -s test/agentprolog_agents_test.pl -s test/agentprolog_config_test.pl -g 'run_tests,halt'
+#+end_src
+
+Fix: compare requested capabilities and budget keys with reviewed operator
+=allowed_capabilities=, =budget_ceiling= and =budget_limits=. A named agent must
+fit its parent, not merely the operator's larger ceiling. Register an intended
+tool before requesting its capability. Use =budget_ceiling= only in explicitly
+trusted operator options; never hide capabilities/budgets in =runtime_options=.
+Narrow the task or grants rather than automatically widening them.
+
+Verified limitation: a prompt/skill cannot grant itself a tool, context operation
+or model capability. Ordinary config layers can replace budget keys within the
+operator ceiling; selected agents cannot exceed their merged parent budget.
+
+Source: [[file:../../prolog/agentprolog_config.pl][capability/budget invariants]].
+
+** Incorrect runtime pin or missing library/export
+
+Symptom: the deterministic script stops before tests; =library(rlm_...)= is missing;
+native resume/provider constructor is unavailable; copied docs mention another pin.
+
+Diagnostic:
+#+begin_src sh
+git -C "$PROLOG_RLM_SOURCE" rev-parse HEAD
+rg -n 'prolog-rlm/|4716ba8|commit|rev' flake.nix flake.lock packages/conversation-ui/test/integration-pins.json
+#+end_src
+
+Fix: use the repository-pinned runtime checkout or packaged Nix closure and its
+library path. Coordinate any pin update with lock, fixture/integration pins and
+the real gate; do not mix old runtime files with new host code.
+
+Verified limitation: passing tests at another commit or an older historical
+candidate is not proof for this pin. No network fetch or pin update is necessary
+to diagnose the mismatch locally.
+
+Sources: [[file:../../flake.nix][runtime input]], [[file:../../flake.lock][locked revision]],
+[[file:../../packages/conversation-ui/test/integration-pins.json][fixture pins]].
+
+* Connection and recovery failures
+
+** Snapshot race, snapshot timeout or sequence gap
+
+Symptom: =snapshot_required= immediately after connect, =snapshot_timeout=,
+=sequence_gap=, =session_mismatch= or disconnected/stale display.
+
+Diagnostic:
+#+begin_src sh
+node --test packages/conversation-ui/test/transport.test.js packages/conversation-ui/test/client.test.js packages/conversation-ui/test/projection.test.js
+#+end_src
+
+Fix: =await client.connect()= before commands. Current =connect()= waits for both
+negotiation and the canonical snapshot; the formerly observed negotiation-only
+readiness race is resolved and has a regression test with a separately delivered
+snapshot. A custom adapter must emit the correct snapshot after negotiation and
+ordered events thereafter. Reconnect for canonical state after a fault rather
+than fabricating missing events or replaying mutations.
+
+Verified limitation: increasing timeouts or adding sleeps does not repair a
+malformed protocol. The bundled host returns full snapshots, not event-log replay.
+Old visible state is stale and cannot authorize decisions. Reconnect restarts the
+child and can interrupt a running native task.
+
+Sources: [[file:../../packages/conversation-ui/src/client.js][readiness]],
+[[file:../../packages/conversation-ui/test/transport.test.js][separate-snapshot regression]],
+[[file:../../.prolog/kb/session_lifecycle.pl][recorded cause and fix]].
+
+** Owner lock, configuration mismatch or receipt exhaustion
+
+Symptom: lock acquisition/start failure, =session_configuration_mismatch=,
+=receipt_limit= or =request_conflict=.
+
+Diagnostic (identifies processes without displaying arbitrary command-line secrets):
+#+begin_src sh
+lsof -- "$STATE/owner.lock"
+#+end_src
+
+To inspect only coarse checkpoint metadata, not objectives/tool payloads:
+#+begin_src sh
+python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); print({k:s.get(k) for k in ("version","session_id","workspace_id","phase","run_id","config_binding")}); print("receipt_count",len(s.get("receipts",[])))' "$STATE/session.json"
+#+end_src
+
+Fix: stop the correct competing owner. Restore the original project/config/source
+bytes when resuming the same identity; otherwise deliberately select a new
+private =--state= directory. Preserve old state. A repeated wire request ID must
+have the same command/payload. An unknown outcome requires inspection, not a new
+UUID and blind retry.
+
+Verified limitation: deleting =owner.lock= while a process owns the old inode
+does not safely release ownership. There is no session migration, receipt-pruning
+or configuration-rebinding CLI. Default state selection hashes the project path,
+not the config, so a changed agent/plugin can still select old incompatible state.
+
+Source: [[file:../../prolog/agentprolog_session.pl][lock, binding and durable receipts]].
+
+** Stale approval, busy session or interrupted resume
+
+Symptom: =stale_decision=, =decision_not_offered=, =invalid_approval=,
+=session_busy=, or a reconnect shows interrupted instead of complete.
+
+Diagnostic in the running terminal:
+#+begin_example
+/inspect
+/profile
+#+end_example
+
+Fix: use only a currently pending ID and its offered =allow_once= or =deny=.
+Wait for actual terminal cancellation/cleanup before a new turn. A native approval
+lost on restart has no recoverable in-memory cursor; inspect actual files, then
+choose a new objective or =/resume= intentionally. =/resume= reruns the last
+objective under a new run ID and can consume new provider usage.
+
+Verified limitation: cancellation is not rollback; command acknowledgement is
+not completion. Artifact-only pending reviews can survive an abrupt checkpoint
+restore, unlike native pending execution; normal shutdown requests their
+cancellation, so do not assume graceful reconnect preserves them. Neither acceptance nor =state.status:"finished"= proves
+publication or success; inspect =state.run.outcome.status=.
+
+Source: [[file:../../prolog/agentprolog_session.pl][approval/restart/cancellation branches]],
+[[file:sessions-and-recovery.org][full recovery semantics]].
+
+* Tool and generated-artifact failures
+
+** Tool result is opaque or model cannot see a read/check result
+
+Symptom: a native tool ran and the UI displays output, but the model only has a
+retained result-context reference or repeatedly guesses the result.
+
+Diagnostic:
+#+begin_src sh
+rg -n 'context_peek|selector|result_read|context\(peek\)' packages/conversation-ui/test/support/generic_fixture.pl
+#+end_src
+
+Fix: grant =context(peek)= explicitly within the operator ceiling and configure
+the agent to inspect the returned context using native =context_peek=. The native
+fixture demonstrates =selector:_{type:"item",index:0}= with its result context
+identifier. Use the identifier returned by the runtime, not a guessed universal
+name. Distinguish tool capabilities from context capabilities.
+
+Verified limitation: a UI output preview is not proof that the full result was
+injected inline into the provider conversation. Host tool previews may be
+truncated; do not solve this by copying unbounded outputs into prompts.
+
+Sources: [[file:../../packages/conversation-ui/test/support/generic_fixture.pl][opaque-context fixture]],
+[[file:../../prolog/agentprolog_session.pl][bounded observations]].
+
+** Stale source hash, create-on-existing-file or nonunique modify
+
+Symptom: =stale_content=, =already_exists=, =non_unique_match=,
+=invalid_path=, =symlink_denied=, =missing_parent= or =file_too_large=.
+
+Diagnostic:
+#+begin_src sh
+swipl -q -p "library=$PROLOG_RLM_SOURCE/prolog" -s test/agentprolog_workspace_tools_test.pl -g 'run_tests(agentprolog_workspace_tools),halt'
+sha256sum -- "$ARTIFACT_DIR/workspace/app.mjs"
+#+end_src
+
+Fix: read the current file and inspect its actual hash, reconcile intervening
+edits, then request a new hash-guarded write/modify approval. Use create only for
+absent files; use exactly one nonempty match for modify. Select a regular file in
+the trusted root with pre-existing parents and <=65,536 UTF-8 bytes. Do not bypass
+preconditions because an older operation was approved.
+
+Verified limitation: preflight and execution revalidation catch normal intervening
+changes, not every hostile concurrent filesystem race. These tools do not create
+directories/delete files and are not an OS sandbox.
+
+Source: [[file:../../prolog/agentprolog_workspace_tools.pl][content/path enforcement]].
+
+** “Check finished” but source is invalid or the app does not work
+
+Symptom: =workspace_check= tool outcome is ok but =exit_code= is nonzero; or
+syntax passes while =todo_app_start_failed= / HTTP acceptance fails.
+
+Diagnostic:
+#+begin_src sh
+node --check "$ARTIFACT_DIR/workspace/app.mjs"
+node --test packages/conversation-ui/test/todo-app-proof.test.js
+#+end_src
+
+Fix: inspect =exit_code= and bounded diagnostics; repair actual source through a
+new hash-guarded mutation. The todo app must export =createServer()= without
+listening during import, implement the original HTTP CRUD contract, validate
+inputs and preserve other todos. Alias the imported =node:http= constructor when
+the exported function uses the same name. Do not weaken the requirements to make
+a static page pass. Positive/negative checker fixtures distinguish a working
+server, static mock and unstartable module.
+
+Verified limitation: syntax-only checking does not execute a program. Independent
+HTTP acceptance does execute code, but does not automate a browser or establish
+production readiness, network isolation or restart persistence.
+
+Sources: [[file:../../prolog/agentprolog_check_tool.pl][exit-code semantics]],
+[[file:../../test/agentprolog_check_tool_test.pl][nonexecuting syntax tests]],
+[[file:../../packages/conversation-ui/test/todo-app-proof.test.js][checker controls]].
+
+** Node rejects a permission flag or checker controls fail
+
+Symptom: Node rejects =--experimental-permission=, or the functional control app
+cannot start under the independent checker.
+
+Diagnostic:
+#+begin_src sh
+node --version
+node --help
+node --test packages/conversation-ui/test/todo-app-proof.test.js
+#+end_src
+
+Fix: use the pinned development environment/supported Node runtime and current
+checker, which invokes stable =--permission=. The known Node 24 failure involved
+the obsolete experimental flag. Require the positive functional server control
+to pass and negative controls to fail before attributing failures to generated
+code. Do not remove permission restrictions to hide an incompatible checker.
+
+Verified limitation: =node >=22= in package metadata is not proof that every early
+minor version supports the exact flags used by the checker. Node permission mode
+is not an OS sandbox or network firewall.
+
+Sources: [[file:../../packages/conversation-ui/test/todo-app-proof.js][stable flag]],
+[[file:../../packages/conversation-ui/package.json][engine declaration]],
+[[file:../../.prolog/kb/acceptance.pl][known flag failure]].
+
+* Usage, credentials and acceptance evidence
+
+** Failed run shows usage, or an old build lost failed-run usage
+
+Symptom: a budget/provider failure follows earlier completed calls; usage seems
+missing, or a failed run is incorrectly assumed to cost nothing.
+
+Diagnostic:
+#+begin_src sh
+swipl -q -p "library=$PROLOG_RLM_SOURCE/prolog" -s test/agentprolog_session_test.pl -g 'run_tests(agentprolog_session:failed_run_retains_actual_usage),halt'
+#+end_src
+
+Fix: use the implementation that projects actual usage from a native error dict
+before finishing failed. Inspect categorical outcome plus =cost_known=, tokens,
+model/tool calls and reported cost. Preserve the distinction between runtime
+budget admission failure and provider/transport error.
+
+Verified limitation: the regression is fixed when the native error includes
+usage; the host cannot reconstruct missing provider billing information. No
+reported cost is not zero cost, and the last run's usage is not historical
+whole-session spend. Budget failure is not permission to start a paid repair.
+
+Sources: [[file:../../prolog/agentprolog_session.pl][failed_usage and safe_failure]],
+[[file:../../test/agentprolog_session_test.pl][usage regression]].
+
+** Missing credential, unknown cost or exhausted acceptance target
+
+Symptom: opt-in acceptance refuses to start, returns sanitized native provider
+failure, reports unknown cost, or blocks an automatic repair on budget/cost.
+
+Diagnostic (presence only; never print the value):
+#+begin_src sh
+node -e 'for (const n of ["OPENROUTER_API_KEY","ZAI_API_KEY"]) console.log(n + ": " + (process.env[n] ? "present" : "missing"))'
+#+end_src
+
+Fix: request the operator's existing authorized credential through their normal
+secret mechanism and confirm intended provider, model, endpoint, key type and
+quota. Do not create accounts, recover secrets, switch to another paid provider
+or increase budget without authorization. For the todo runner, explicitly select
+=openrouter= or =zai_coding=; it has no automatic fallback. Known cumulative
+cost and the per-invocation target govern permitted repairs; unknown cost blocks
+additional automatic model turns.
+
+Verified limitation: presence is not validity or proof of billing category.
+=max_cost_usd= is a reported-usage guard, not a provider-side reservation. A new
+runner invocation starts new accounting; previous permission or the final turn's
+cost does not establish cumulative authorization.
+
+Source: [[file:../../packages/conversation-ui/test/todo-app-acceptance.js][opt-in checks and repair accounting]],
+[[file:security-and-approvals.org][cost/secret boundaries]].
+
+** Recorded todo verification rejects a route or current source hash
+
+Symptom: =verify-recorded-todo.js= rejects provider/model, incomplete state,
+missing successful mutation/check or changed source digest.
+
+Diagnostic, with no new model call (executes generated code and updates the
+artifact directory's =evidence.json= on success):
+#+begin_src sh
+node packages/conversation-ui/test/verify-recorded-todo.js "$ARTIFACT_DIR"
+#+end_src
+
+Fix: select the correct existing artifact directory and retain the source bytes
+actually observed by the successful native mutation. A manual post-generation
+edit invalidates that provenance; fresh HTTP success alone cannot repair a
+broken generation-to-source chain. Review/repair through an explicitly authorized
+new run if needed. Do not change recorded hashes or route fields to pass.
+
+Verified limitation: this specific verifier chooses the newest =state*= checkpoint
+by mtime and requires =openrouter= with selected model =openai/gpt-4.1-mini=.
+The live todo runner accepts more provider/model selections, but this recorded
+verifier is not generalized to them. Its successful receipt labels model I/O
+as recorded, not fresh; only the HTTP checks are rerun. A recorded artifact pass
+cannot prove all independent/manual/provider-specific gates passed.
+
+Source: [[file:../../packages/conversation-ui/test/verify-recorded-todo.js][actual verifier contract]].
+
+* Minimal issue evidence
+
+Report application commit, runtime pin, Node/SWI versions, exact safe diagnostic
+command and exit status, categorical outcome, whether the connection was ready,
+and which synthetic/recorded/live gate was actually run. Include source hashes
+and coarse usage only when appropriate. Redact paths/objectives/tool data as
+needed; never attach credentials or full raw checkpoints. Distinguish source/test
+coverage, newly executed local checks, recorded real-provider evidence and a new
+authorized provider call.

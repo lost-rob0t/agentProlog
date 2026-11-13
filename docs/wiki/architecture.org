@@ -1,0 +1,116 @@
+:PROPERTIES:
+:ID: 73e00f7a-fbca-48f7-a77e-e4cdae244bf5
+:END:
+#+TITLE: Architecture
+#+CREATED: [2026-11-12 Thu 22:08]
+#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: documentation
+#+ROAM_VISIBILITY: private
+#+CENSOR_PROFILE: strict
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:ce33adc465f0a722c6cc77e8de767b95c06226a1bb0c526b17d6d9de834c9887; repository target docs/wiki/architecture.org; source links in body
+#+AI_GENERATED: t
+#+AI_TAG: ai_19d7401e0fd71ee9
+#+FILETAGS: :ai:ai_19d7401e0fd71ee9:agentprolog:prolog-runtime:documentation:architecture:
+
+#+PROPERTY: header-args :eval never-export
+#+description: Product/runtime ownership, source map, and implemented execution lifecycle.
+
+[[file:Home.org][Wiki home]] · [[file:api-reference.org][API reference]] · [[file:integrations.org][Integrations]] · [[file:development-and-testing.org][Development and testing]]
+
+* One product, one runtime
+
+AgentProlog is an application composed over Prolog-RLM, not a competing agent runtime. The dependency direction is =AgentProlog -> Prolog-RLM=. The flake consumes the upstream default package; it does not vendor a runtime implementation. The current executable is a Node terminal client paired with a SWI-Prolog session host, not the Bubble Tea frontend described in early planning documents.
+
+#+begin_example
+Operator-approved configuration, packages, native skills
+                         |
+Node terminal UI / another canonical client
+                         | prolog_agent_ui_v1, NDJSON over stdio
+AgentProlog session host | durable product session and presentation adapter
+                         |
+Public Prolog-RLM APIs    | direct/completion, tools, authority, effects,
+                         | async execution, prompt compiler, UI facade
+                         |
+Provider/model transport and native execution
+#+end_example
+
+| Concern | AgentProlog ownership | Prolog-RLM ownership |
+|---------+-----------------------+----------------------|
+| Product configuration | Trusted operator/plugin/project loading, package attachment, named-agent selection, defaults | Runtime option semantics and capability normalization |
+| Prompts and skills | Inert native skill serialization, trusted instructions, selection and projection | =prompt_unit= IR, catalog validation, compilation, rendering |
+| Session/UI | Product session identity, checkpoint binding, command receipts, CLI and disposable JS projection | Canonical UI frame schema, semantic event facade and reducer |
+| Execution | Compose options and invoke public APIs; observe tool callbacks | Model/tool loop, planning/completion, futures, recursion and budgets |
+| Tools | Bounded workspace file operations and fixed Node syntax-check adapter | Registry, schema checks, native authority and effect mediation |
+| Approval | Display requests; forward exact operator decision; retain native cursor while waiting | Approval resolution, resumable execution cursor, durable effect semantics |
+| Integrations | Cordis lifecycle wrapper, frontend/session adapters and optional profile advertisement | Runtime descriptors and execution exposed to external hosts |
+| Scheduling/providers | No replacement implementation | Scheduler, provider/model transport, cancellation and accounting |
+
+Source authority: [[file:../../flake.nix][flake.nix]], [[file:../../prolog/agentprolog_session.pl][session host]], [[file:../../prolog/agentprolog_config.pl][configuration loader]], [[file:../../prolog/agentprolog_prompt.pl][prompt projection]], [[file:../../packages/conversation-ui/src/client.js][canonical client]].
+
+* Source map
+
+| Path | Responsibility |
+|------+----------------|
+| [[file:../../prolog/agentprolog_config.pl][prolog/agentprolog_config.pl]] | Load and validate explicitly trusted layers; constrain capabilities/budgets; choose an agent |
+| [[file:../../prolog/agentprolog_skills.pl][prolog/agentprolog_skills.pl]] | Read native skills as data; import Markdown through upstream skill APIs |
+| [[file:../../prolog/agentprolog_prompt.pl][prolog/agentprolog_prompt.pl]] | Compile configured instructions/skills with the upstream compiler and project model requests |
+| [[file:../../prolog/agentprolog_session.pl][prolog/agentprolog_session.pl]] | Canonical stdio host, product checkpoint, receipts and runtime invocation |
+| [[file:../../prolog/agentprolog_workspace_tools.pl][prolog/agentprolog_workspace_tools.pl]] | Read/create/hash-guarded write/modify tool definitions and callbacks |
+| [[file:../../prolog/agentprolog_check_tool.pl][prolog/agentprolog_check_tool.pl]] | Fixed, bounded =node --check= process tool |
+| [[file:../../prolog/agentprolog_import_skill.pl][prolog/agentprolog_import_skill.pl]] | Executable importer entrypoint, not a library module |
+| [[file:../../packages/conversation-ui/][packages/conversation-ui/]] | Canonical JS client, terminal renderer, fixtures and acceptance drivers |
+| [[file:../../packages/deepseek-harness/][packages/deepseek-harness/]] | Separate narrow Cordis bridge and its transport tests |
+| [[file:../../packages/zara-profile/][packages/zara-profile/]] | Optional =ZARA-RUNTIME/1= AgentProlog profile advertisement/handshake |
+| [[file:../../examples/packs/coding/][examples/packs/coding/]] | Ordinary local SWI pack with builder/reviewer configuration and native skill |
+| [[file:../../test/][test/]] | Local Prolog unit tests |
+| [[file:../../scripts/check.sh][scripts/check.sh]] | Exact-pin local deterministic gate |
+
+* Configuration is trusted code; skills are data
+
+An explicitly supplied operator module exports =agentprolog_options/1=. Product/plugin/project modules export =agentprolog_config/1=. Local packages are ordinary SWI packs with =pack.pl= and =prolog/agentprolog_plugin.pl=; there is no second package manager or dependency resolver. A project-local =.agentprolog/config.pl= requires explicit trust and is rejected, not silently ignored, when present without that trust.
+
+These modules are consulted executable Prolog, with arbitrary host-process authority. Capability checks constrain runtime requests, not malicious initialization directives in trusted modules. Use a fresh sidecar process for each project. Never derive executable configuration paths/options or closures from model output.
+
+By contrast, native skill documents contain exactly one =agentprolog_skills([...]).= data term. The loader reads terms without consulting directives, bounds documents/bodies, validates upstream prompt units and adds source/hash provenance. A skill cannot grant capabilities, expand budgets or declare itself mandatory/always active. Selection still passes through the upstream compiler.
+
+Configured instructions or native skills currently use a non-streaming host callback that forwards through the canonical upstream provider wrapper. This is a projection limitation, not an alternative compiler or provider engine. See [[file:../../test/agentprolog_skills_test.pl][skill projection tests]] and [[file:api-reference.org][callback reference]].
+
+* Canonical execution lifecycle
+
+1. The packaged CLI resolves the project and state directory, then spawns the bundled session host without a shell. Alternatively, an operator selects an external canonical sidecar.
+2. The host loads trusted configuration, acquires the state directory's non-waiting =owner.lock=, opens the upstream effect store and creates/restores its checkpoint.
+3. The client negotiates =prolog_agent_ui_v1= and required capabilities. A successful negotiation alone is insufficient: =Client.connect()= waits for a validated canonical snapshot before accepting commands.
+4. A =session.turn= command admits its request ID durably before asynchronous dispatch. It starts a fresh run/view for the supplied objective. A blank objective requests a question; =question.answer= starts execution with that answer.
+5. The host creates a native tool registry and invokes =rlm_direct_execute/4= in =direct= mode or =rlm_completion/4= in =rlm= mode. Both are upstream runtime paths, not independent local agent loops.
+6. Native callbacks produce canonical semantic events through the upstream UI facade/reducer. Tool observations, text, usage, traces, questions and approvals are projected by the JS client; the UI does not execute tools or choose model actions.
+7. In =direct= mode, a suspended native approval retains execution state. An exact =allow_once= decision resolves upstream authority and resumes the cursor; denial rejects execution. Cancellation releases pending work/cursor. Restart marks in-flight/suspended work interrupted instead of replaying it. Typed-plan approvals in =rlm= mode are not wired into this product continuation bridge.
+8. A terminal stream is not itself task success. Inspect =view.state.run.outcome.status=. Accepted artifacts retain =published:false=; there is no generic product publication command.
+
+The host supports one configured durable session per state directory. =session.create= and =session.select= return/refresh that session; they are not multi-session workspace discovery APIs. =session.resume= explicitly starts a new run for the previous objective; it is not crash-transparent resumption of a native cursor. Ordinary follow-up turns are fresh objective runs, not a promise of automatically preserved multi-turn model history.
+
+* Persistence and recovery
+
+| State file | Role |
+|------------+------|
+| =owner.lock= | One host owns the state directory; concurrent owners fail rather than sharing execution |
+| =session.json= | Versioned product checkpoint: IDs, canonical view, phase, objective, configuration binding and request receipts |
+| =effects.db= | Upstream durable effect store opened for this session |
+| =session.json.tmp= | Temporary checkpoint used before atomic rename |
+
+The configuration binding includes normalized configuration and hashes of recorded source files, including operator config, pack manifests and selected skill sources. A different configuration/project binding is rejected. This does not claim a complete transitive dependency hash or an OS sandbox.
+
+Admitted requests are retained with command/payload identity. An exact duplicate receives its stored receipt; reuse with a different payload is a conflict. An interrupted admitted request carries =recovery:"inspect_snapshot_before_retry"=. Receipts are bounded to 1024; this is not indefinite exactly-once operation storage. The JS client does not automatically retry uncertain commands and normally generates a fresh request ID for each call.
+
+Disconnect leaves the last view visibly stale. Reconnect closes the old process, starts the operator-configured sidecar and replaces the projection with its canonical checkpoint. Duplicate/old events are ignored; sequence gaps or session mismatches fail closed. Runtime persistence, not rendered terminal output, is authoritative.
+
+* Current boundaries, not roadmap promises
+
+- Prolog-RLM has a broader public API than AgentProlog exposes. The local configuration loader allow-lists runtime options; the canonical host allow-lists commands. An upstream predicate's existence does not make it a wire operation or CLI feature.
+- The JS projection understands subagent events. The bundled host does not advertise a subagent capability, offer a =/spawn= command, or implement a product subagent scheduler. Named agents are selectable configurations, not evidence of an implemented autonomous multi-agent team UI.
+- =mode:rlm= invokes upstream completion. This does not expose every upstream workflow, Spec/Plan/Verify operation, expert API or evolution API as a product feature.
+- DeepSeek Harness uses a distinct version-1 operation bridge, not the canonical conversation client's protocol. Its current package is a service/lifecycle slice; full AgentFactory/workspace UI and evolutionary-product integration are not established by those transport tests.
+- Zara support is an optional profile of the existing Prolog-RLM runtime, not a second runtime identity or a dependency from Zara to AgentProlog.
+- Deterministic/native fixture success, recorded real-provider artifacts and fresh live acceptance are different evidence. No current hosted or live pass is inferred from checked-in scripts or old status prose.
+
+See [[file:integrations.org][integration boundaries]], [[file:api-reference.org][supported APIs and commands]], and [[file:development-and-testing.org][test/evidence classes]].

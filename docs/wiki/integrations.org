@@ -1,0 +1,138 @@
+:PROPERTIES:
+:ID: 122eb0b1-f191-4409-8450-2ca65c7636c1
+:END:
+#+TITLE: Integrations
+#+CREATED: [2026-11-12 Thu 22:08]
+#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: documentation
+#+ROAM_VISIBILITY: private
+#+CENSOR_PROFILE: strict
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:1ed3968e08806a6debb2b40a3f89d66c047d7e9568db1c57898c3d71c6e46a70; repository target docs/wiki/integrations.org; source links in body
+#+AI_GENERATED: t
+#+AI_TAG: ai_998c5989e4147799
+#+FILETAGS: :ai:ai_998c5989e4147799:agentprolog:prolog-runtime:documentation:integrations:
+
+#+PROPERTY: header-args :eval never-export
+#+description: Canonical sidecars, the DeepSeek Harness bridge, and the optional Zara profile.
+
+[[file:Home.org][Wiki home]] · [[file:architecture.org][Architecture]] · [[file:api-reference.org][API reference]] · [[file:development-and-testing.org][Development and testing]]
+
+* Do not conflate the integration contracts
+
+| Integration | Contract | Host role | Runtime role |
+|-------------+----------+-----------+--------------|
+| Default terminal application / external canonical sidecar | =prolog_agent_ui_v1=; =negotiate=, =command=, =snapshot=, =event=, =result=, =error= | Project/config selection, terminal presentation and operator decisions | Canonical sessions, tool/model execution, authority and checkpoint truth |
+| DeepSeek Harness/Cordis package | Numeric =version:1= operation/event bridge | Publish =agentPrologRlm= service and own persistent sidecar lifecycle | Answer =runtime.describe= and allow-listed operations; supply ordered events |
+| Zara optional profile | =ZARA-RUNTIME/1=, runtime ID =prolog-rlm=, profile ID =agentprolog= | Zara discovery, host context/plugins/approvals/platform integration | Prolog-RLM execution and provider/model control |
+
+None of these makes the JavaScript adapter a scheduler, prompt compiler, provider implementation or effect engine. Prolog-RLM remains authoritative. A descriptor or projection's ability to carry a field does not prove the product implements every associated upstream feature.
+
+* Canonical client and external adapters
+
+The default application is [[file:../../packages/conversation-ui/src/cli.js][the Node canonical CLI]]. It launches [[file:../../prolog/agentprolog_session.pl][the bundled session host]] using the pinned upstream runtime. A downstream application can instead implement the canonical UI contract and use the same renderer/client:
+
+#+begin_src sh
+# Trusted operator-selected executable; no shell expansion/evaluation by the UI.
+node packages/conversation-ui/src/cli.js \
+  --sidecar /absolute/path/to/reviewed-canonical-adapter \
+  --sidecar-arg adapter-specific-argument
+#+end_src
+
+=AGENTPROLOG_SIDECAR= also selects an external executable. For external adapters, use =--sidecar-arg= for their arguments: bundled host flags/configuration and a separate =--state= are rejected, as is a changed project selection. The adapter must actually speak =prolog_agent_ui_v1=; an arbitrary JSON logger, the Harness operation bridge, or a Zara HTTP runtime is not interchangeable.
+
+The client spawns argv without a shell. This does not sandbox the chosen executable; it inherits the client environment. Only an operator may choose executables/argv. A downstream host owns its business rules and trusted tool/profile composition; the generic application does not acquire domain tools from the downstream repository name.
+
+External adapters need to supply negotiation plus canonical snapshot before events/commands; preserve session/request correlation; sequence events without gaps; and resolve approvals/questions against current canonical state. Reconnect must return honest current/interrupted state, not silently replay uncertain mutations. See [[file:api-reference.org][wire/client reference]] and [[file:../../packages/conversation-ui/test/native.runtime.js][official native conformance fixture]].
+
+* DeepSeek Harness/Cordis: implemented boundary
+
+The current [[file:../../packages/deepseek-harness/][DeepSeek Harness package]] is a private ES-module protocol/lifecycle slice. It exports source modules, tests a namespaced service and persistent sidecar, and does not contain a complete AgentFactory implementation, browser/TUI plugin, evolutionary engine or end-to-end full Harness installation. Historical design notes describe intended follow-on work, not shipped UX.
+
+** Compatibility is exact and fail-closed
+
+[[file:../../packages/deepseek-harness/src/compatibility.js][SUPPORTED_HARNESS]] declares:
+
+| Field | Required value |
+|-------+----------------|
+| Harness version | =0.1.1-rc.2= |
+| Harness revision | =b150a551b8d465e31e418e1b2eaf5e79bbb7d28e= |
+| Declared Node engine | =^22.19.0 || >=24.0.0= |
+
+=assertHarnessCompatibility({version, revision})= compares version and revision exactly before any process spawn or service publication. The Node range is declared metadata, not a runtime semver check in that function. “Developer preview” is not permission to accept arbitrary newer Harness revisions.
+
+** Plugin lifecycle API
+
+[[file:../../packages/deepseek-harness/src/plugin.js][apply(ctx, config, {Transport}?)]] requires a Cordis-like =ctx.effect()= and a configured sidecar command plus explicit Harness identity. It publishes through =ctx.provide()= when available, or =ctx.set()= as fallback. The optional =Transport= injection is a trusted testing seam, not wire-selected executable behavior.
+
+| Config field | Default / meaning |
+|--------------+-------------------|
+| =command= | Required, trusted pinned sidecar executable |
+| =args= | =["--stdio"]= |
+| =cwd= | Passed to process spawn |
+| =env= | ={}= overrides merged over the parent process environment |
+| =shutdownMs= | =2000= milliseconds |
+| =harness= | Required exact ={version, revision}= identity |
+
+Startup creates one =SidecarTransport=, sends =runtime.describe=, checks protocol version, records reported capabilities and only then publishes =agentPrologRlm=. The returned object is ={service, dispose}=. The frozen service has:
+
+| Method | Behavior |
+|--------+----------|
+| =request(frame)= | Validate/forward an operation frame; correlate the result |
+| =onEvent(listener)= | Subscribe; returns an unsubscribe function |
+| =describe()= | Return startup description |
+| =capabilities()= | Return frozen shallow copy of reported capabilities |
+
+Cordis cleanup removes the service and stops the transport. =stop()= rejects pending bridge requests, closes stdin, waits for exit up to =shutdownMs=, then sends SIGTERM if the child still remains. It does not currently issue per-run cancel operations, await structured terminal run outcomes, or perform a SIGKILL escalation. Do not describe the richer shutdown sequence in the old design note as implemented behavior.
+
+** Harness wire surface
+
+[[file:../../packages/deepseek-harness/src/protocol.js][protocol.js]] allows requests with =version:1=, nonempty =request_id=, =session_id= and =operation=. The base operations are:
+
+| Base operation | Intended runtime request |
+|----------------+--------------------------|
+| =runtime.describe= | Discover protocol/runtime capabilities |
+| =session.start= | Start runtime-owned work |
+| =session.cancel= | Request runtime cancellation |
+| =session.inspect= | Obtain runtime-owned inspection data |
+
+=experiment.start=, =experiment.cancel=, =experiment.inspect=, =experiment.population= and =experiment.lineage= pass the bridge validator only when reported =capabilities.evolution === true=. This is a capability gate, not evidence that this repository supplies a real evolution backend. There is no local evolution implementation, product genotype module or arbitrary =call= operation.
+
+Runtime events require version, session ID, run ID, event name and nonnegative safe-integer sequence; optional parent/subagent run IDs preserve correlation. The bridge rejects non-increasing event sequence per run and response session mismatches. It does not require contiguous event sequences like the canonical client.
+
+Current validation is deliberately narrower than a complete payload schema: it does not validate every operation payload, reject all unknown object fields, or implement canonical snapshot replay. Pending duplicate request IDs are rejected; there is no durable request receipt store in the JS bridge. =Bridge.request()= has no built-in request deadline timer. =SidecarTransport= parses NDJSON but has no explicit per-frame/buffer size bound in this implementation. Treat it as the tested narrow integration surface, not interchangeable security guarantees with the canonical client.
+
+The tests in [[file:../../packages/deepseek-harness/test/][test/]] and [[file:../../.github/workflows/deepseek-harness.yml][its CI workflow]] use fixtures/injected transports. They do not establish that a complete Harness UI or every upstream operation is product-exposed. The Nix flake currently provides no packaged Harness installation/profile bundle; an operator must supply a compatible sidecar to this service adapter.
+
+* Zara: optional runtime profile, not another runtime
+
+The =agentProlog-zara-runtime= package wraps the upstream executable:
+
+#+begin_src sh
+nix run .#zara-runtime -- --port 18765
+#+end_src
+
+Its effective command is =prolog-rlm-zara --profile agentprolog ...=. Runtime identity stays =prolog-rlm=. Normal AgentProlog and normal Zara use do not require this optional profile, and Zara does not become dependent on AgentProlog.
+
+[[file:../../packages/zara-profile/src/profile.js][profile.js]] exports:
+
+| Export | Signature | Behavior |
+|--------+-----------+----------|
+| =advertiseAgentPrologProfile= | =(runtimeDescriptor) -> frozen profile or null= | Fail closed unless descriptor is compatible |
+| =handshakeAgentPrologProfile= | =(runtimeDescriptor, request) -> profile or null= | Check requested protocol/profile/runtime identity, then advertise |
+| =AGENTPROLOG_PROFILE_ID= | ="agentprolog"= | Profile selection identity |
+| =PROLOG_RLM_RUNTIME_ID= | ="prolog-rlm"= | Required canonical runtime identity |
+| =ZARA_RUNTIME_PROTOCOL= | ="ZARA-RUNTIME/1"= | Descriptor/handshake protocol |
+
+Advertisement requires =installed:true=, =available:true=, health =ready= / =busy= / =degraded=, runtime-owned provider and model control, a nonempty bounded version string, and a valid unique profile list containing =agentprolog=. The request must match protocol, profile ID, runtime ID and =requires_runtime=. An incompatible descriptor/request returns =null=; the module does not repair it or silently switch engines.
+
+The returned descriptor advertises =agent=, =coding= and =spec-plan-verify= profile capabilities. This is a profile contract, not a new implementation of those runtime semantics or a claim that all such operations appear in the standalone CLI. Tests are in [[file:../../packages/zara-profile/test/profile.test.js][profile.test.js]]; the Nix profile check additionally exercises the upstream runtime descriptor and launcher help.
+
+* Boundary checklist for new adapters
+
+- Keep product UX, host-specific types and domain tools downstream; generic scheduling, authority, providers, effects and prompt compiler changes belong upstream.
+- Use explicit trusted executable/configuration selection. Never turn model text into executable goals, module paths, shell source or process arguments.
+- State exactly which protocol an adapter speaks; preserve error/uncertainty rather than converting disconnect into success.
+- Do not expose private Prolog predicates merely because tests call them with module qualification.
+- Preserve provider/model/usage evidence without claiming that static configuration proves actual calls.
+- Add fixture/native conformance first; run credential-bearing acceptance only with separate explicit authorization.

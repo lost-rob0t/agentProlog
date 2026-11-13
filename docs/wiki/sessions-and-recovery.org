@@ -1,0 +1,249 @@
+:PROPERTIES:
+:ID: 1c046f4a-7973-4bae-9731-1bccc69316cc
+:END:
+#+TITLE: Sessions and recovery
+#+CREATED: [2026-11-12 Thu 23:33]
+#+LAST_MODIFIED: [2026-11-12 Thu 23:33]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: documentation
+#+ROAM_VISIBILITY: private
+#+CENSOR_PROFILE: strict
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:b715b46827053d099fb2063e851ae6f6eb89b808a0d81a3e4b8b80733ebc3658; repository target docs/wiki/sessions-and-recovery.org; source links in body
+#+AI_GENERATED: t
+#+AI_TAG: ai_85cbe494567d20fa
+#+FILETAGS: :ai:ai_85cbe494567d20fa:agentprolog:prolog-runtime:documentation:sessions-and-recovery:
+
+#+PROPERTY: header-args :eval never-export
+#+description: Project-scoped sidecar ownership, durable checkpoints, approvals and honest reconnect behavior.
+
+[[file:Home.org][Wiki home]] | [[file:security-and-approvals.org][Security and approvals]] | [[file:troubleshooting.org][Troubleshooting]]
+
+* One configured project per sidecar
+
+The bundled terminal client launches one generic Prolog session host. Run one
+sidecar process per project/configuration; do not reuse a Prolog process to switch
+between untrusted or differently configured projects. Configuration modules can
+have executable initialization effects and module identity is process-global.
+
+#+begin_src sh
+nix run . -- --project /absolute/project --state /absolute/private/session-state
+#+end_src
+
+Without =--state=, the CLI canonicalizes =--project= with =realpathSync=, hashes that
+absolute path with SHA-256, and uses:
+
+#+begin_example
+$XDG_STATE_HOME/agentprolog/PROJECT_PATH_SHA256
+# fallback when XDG_STATE_HOME is unset:
+~/.local/state/agentprolog/PROJECT_PATH_SHA256
+#+end_example
+
+This is a *project-path* key, not a configuration-hash key. Editing a plugin or
+selecting another named agent does not automatically choose a different default
+state directory. Supply a separate =--state= when intentionally starting a
+differently configured session. Never share one directory across workspaces or
+simultaneously running owners.
+
+For an external adapter use explicit argv:
+
+#+begin_src sh
+node packages/conversation-ui/src/cli.js --sidecar /absolute/adapter --sidecar-arg argument
+#+end_src
+
+External adapters have their own executable contract. The CLI rejects bundled
+host project/config/state flags in that mode; supply adapter arguments through
+=--sidecar-arg=. =AGENTPROLOG_SIDECAR= selects an external adapter;
+=AGENTPROLOG_SESSION= selects the bundled generic host launcher during development.
+There is no shell evaluation of these arguments.
+
+Sources: [[file:../../packages/conversation-ui/src/cli.js][CLI launch rules]],
+[[file:../../prolog/agentprolog_config.pl][process-isolation requirement]].
+
+* What is durable
+
+| State entry | Meaning |
+|-------------+---------|
+| =owner.lock= | Write-locked by the serving process, with nonwaiting acquisition; prevents a second cooperating owner |
+| =session.json= | Versioned checkpoint: session/workspace IDs, config binding, canonical UI view, phase, objective, current run/candidate/approval and request receipts |
+| =effects.db= | Native durable effect store, opened for the lifetime of the host |
+| =session.json.tmp= | Temporary checkpoint used before rename; not the authoritative session file |
+
+The checkpoint is written to a temporary file and renamed into place. This is
+not an append-only conversation archive, encrypted storage, or a promise of
+power-loss durability using fsync. Protect the directory as private data.
+
+The configuration binding hashes a normalized representation of the effective
+configuration plus hashes of its recorded =sources=. Recorded sources include
+loaded product/project modules, package manifests, operator configuration and
+native skill files. Project path and selected agent/options also affect the
+configuration representation. Reopening with a different binding fails with
+=session_configuration_mismatch= before serving the old state.
+
+The binding is not a recursive supply-chain attestation of every imported
+library, executable, environment variable or package resource. It does not imply
+that every transitive dependency or generated workspace file is hashed.
+Do not hand-edit the checkpoint to bypass the mismatch. Either restore the exact
+intended source/configuration or deliberately use a new state directory while
+preserving the old state for diagnosis.
+
+Sources: [[file:../../prolog/agentprolog_session.pl][serve/initialize/config_binding/update]],
+[[file:../../prolog/agentprolog_config.pl][sources assembled by the loader]],
+[[file:../../test/agentprolog_session_test.pl][identity, normalization and mismatch tests]].
+
+* Commands and run boundaries
+
+| UI action | Host behavior |
+|-----------+---------------|
+| Type a nonempty objective | =session.turn= starts a new run when inactive |
+| =/create= | =session.create= selects/refreshes the already configured session and emits its snapshot |
+| =/select= | =session.select= does the same; no arbitrary session selector exists here |
+| =/resume= | =session.resume= starts a *new run* for the last stored objective |
+| =/answer ID TEXT= | Answers an actual pending question and starts a run with the answer as objective |
+| =/answer= / =/answer list= | Bare reopens the newest pending question as a menu; list shows all interactions, answered ones read-only |
+| =/report-bug [TEXT]= | Submits one bug-intake interview objective; its questions are ordinary pending questions |
+| =/cancel= | Requests canonical cancellation; acknowledgement is not final cleanup |
+| =/reconnect= | Closes/restarts the configured sidecar and obtains its current canonical checkpoint |
+| =/inspect= | Renders the current local projection; stale if disconnected |
+| =/profile= | Shows the runtime-advertised descriptor/capabilities, not a profile setter |
+
+=session.turn= accepts objectives up to 16,000 characters; a blank objective sent
+through the protocol creates a question. The CLI ignores blank input rather
+than sending it. Answers must be nonempty strings no longer than 16,000
+characters. Running, cancelling, awaiting approval and awaiting question are
+busy states; a second turn/resume is rejected as =session_busy=.
+
+Starting a run creates a fresh run ID, replaces the per-run UI view, and retains
+the session/workspace identity and sequence cursor. The native call receives
+the current objective as its input. Although the UI accepts a typed “follow-up,”
+the host does *not* inject its whole persisted UI conversation as model history.
+It does not restore a previous provider conversation or a crashed execution
+cursor. Include required context explicitly in the objective or expose it through
+the trusted native tools/compiler. =/resume= is not continuation from the exact
+instruction where a previous run stopped.
+
+The generic host dispatches only create/select/turn/resume/cancel, approval
+decisions and question answers. There is no =session.steer= command. The separate
+DeepSeek bridge has its own operation allowlist and does not acquire steer
+support merely because an upstream runtime has related APIs.
+
+Sources: [[file:../../prolog/agentprolog_session.pl][command dispatcher and start/native_execute]],
+[[file:../../packages/conversation-ui/src/cli.js][terminal command mapping]],
+[[file:../../packages/deepseek-harness/src/protocol.js][separate bridge allowlist]].
+
+* Live approval versus restart recovery
+
+Native direct-execution approval retains the in-process registry, native cursor
+and deferred decision queue. =allow_once= resolves native authority and resumes
+that cursor without reconstructing execution by repeating model/tool calls.
+This is distinct from =session.resume=, which starts a new run.
+
+| Situation | Recovery behavior |
+|-----------+-------------------|
+| Restart finds =running= or =cancelling= | Records =interrupted= with =host_restart=; no automatic model/mutation replay |
+| Restart finds =native_pending:true= | Resolves the displayed approval as deny and records interrupted; in-memory continuation is gone |
+| Cancel during a native pending approval | Resolves displayed approval as deny, signals cancellation and releases/cancels the retained cursor |
+| Cancel during artifact-only review | Resolves approval as deny and finishes cancelled; no native cursor exists |
+| Fresh host finds an artifact-only =awaiting_approval= checkpoint after abrupt termination | Persisted artifact review can remain pending; it is not the native-pending invalidation case |
+| Normal shutdown/EOF enters =shutdown/0= while artifact review is pending | Shutdown requests cancellation; do not promise that the review survives graceful teardown |
+| Restart finds =awaiting_question= | Pending question remains in the checkpoint; do not invent a new answer or turn automatically |
+
+Do not state that *all* approval rows are invalidated by every restart: the
+implementation specifically invalidates native pending execution. Artifact-hook
+review is durable candidate data and follows a different restore branch. This
+does not promise survival through every shutdown: =shutdown/0= requests stop for
+any =awaiting_approval= phase. =/reconnect= first closes the old child and starts a
+new one; do not equate reconnection with an abrupt-crash checkpoint restore.
+Neither kind of acceptance publishes an artifact.
+
+For active/native work, cancellation moves to =cancelling=, emits verification
+with =cleanup_confirmed:false=, signals the token/future and requests stop.
+That stop path emits terminal =cancelled= with =cleanup_confirmed:true= after
+worker cleanup, or immediately if no worker is running. Direct cancellation of
+artifact-only review or a pending question instead finishes with
+=status:"cancelled"= without that extra field. A cancellation command result
+alone is not a terminal outcome. Already committed files or provider usage are
+not rolled back. Inspect actual effects after ambiguous interruption.
+
+Native cancellation before an authority execution claim prevents the continuation
+from running; after that claim, cancellation is best-effort interruption of work
+already admitted. A killed process cannot prove that a remote operation was
+undone. Prefer the runtime's categorical outcome and independent artifact checks
+to a blanket “nothing happened” assumption.
+
+Sources: [[file:../../prolog/agentprolog_session.pl][restart, request_stop and native_continuation]],
+[[file:../../packages/conversation-ui/test/generic.runtime.js][cancel/crash/native approval process tests]],
+[[file:../../test/agentprolog_workspace_tools_test.pl][native deny/owner-cancel tests]].
+
+* Durable receipts and request deduplication
+
+The host durably admits a command's identity *before* asynchronous dispatch.
+Receipts are stored in =session.json= and bound to request ID, command and payload.
+
+- A duplicate ID with the same command and equivalent payload returns its saved
+  result; it does not run the command again.
+- Reusing an ID with a changed command or payload yields =request_conflict=.
+- A crash between admission and final result can leave an indeterminate receipt
+  containing =recovery:"inspect_snapshot_before_retry"=. It is not proof that the
+  operation completed, and replaying that ID does not implicitly resubmit it.
+- Rejected admitted commands also receive saved error receipts. At 1,024 receipts,
+  further new identities hit =receipt_limit=; there is no pruning/rotation command
+  in this host. Choose a new session directory deliberately rather than deleting
+  receipts out of a live checkpoint.
+
+This is command deduplication and honest crash ambiguity, not an exactly-once
+transaction spanning arbitrary external effects, checkpoint writes and providers.
+The JS client's =request()= generates a new UUID for each call; it does not persist
+or expose a reconnect retry ledger. Calling =command()= again is a new request,
+not automatic receipt replay. On timeout, inspect the canonical snapshot and
+real artifacts before deciding whether a new operation is appropriate.
+
+Source: [[file:../../prolog/agentprolog_session.pl][command_frame/admit_request/commit_receipt]],
+[[file:../../packages/conversation-ui/src/client.js][request identity and timeout behavior]].
+
+* Reconnect and canonical snapshots
+
+=await client.connect()= is ready only after both successful negotiation and the
+first valid canonical snapshot. The historical race where negotiation resolved
+before snapshot readiness is fixed. Do not add sleeps as a substitute for this
+contract. An adapter that negotiates but supplies no snapshot causes
+=snapshot_timeout= and child termination.
+
+On reconnect, the client closes the old child before spawning a replacement,
+negotiates =prolog_agent_ui_v1= and includes its old =resume_from= cursor. The
+bundled host responds with a full canonical checkpoint; it does not provide a
+cursor-based event-log replay service. A snapshot replaces the disposable JS
+projection. Old state can stay visible as stale while disconnected but cannot
+authorize a decision.
+
+Duplicate event sequence numbers are ignored. Gaps, wrong sessions, malformed
+frames, unsupported required extensions or missing required capabilities fail
+closed. Client request timeout does not retry uncertain mutations; it marks the
+connection unusable and terminates the child. Close/failure uses SIGTERM with
+bounded escalation to SIGKILL. Reconnect is therefore a process restart, not a
+transparent detach/reattach to an uninterrupted background run.
+
+Read =state.run.outcome.status= for run truth. Projection =state.status:"finished"=
+does not distinguish complete, failed, rejected, cancelled or interrupted. A
+tool's =status:"finished"= likewise does not prove its operation succeeded.
+Usage on failed native outcomes is projected before run completion when the
+native error includes actual usage; unknown/missing usage is not zero.
+
+Sources: [[file:../../packages/conversation-ui/src/client.js][connection lifecycle]],
+[[file:../../packages/conversation-ui/src/projection.js][strict projection]],
+[[file:../../packages/conversation-ui/test/transport.test.js][separate-snapshot regression]],
+[[file:../../test/agentprolog_session_test.pl][failed_run_retains_actual_usage]],
+[[file:../../.prolog/kb/session_lifecycle.pl][durable regression knowledge]].
+
+* Recovery checklist
+
+1. Stop issuing commands after a timeout/disconnect; retain the state directory.
+2. Check that the intended project, reviewed configuration, source hashes and
+   runtime pin are unchanged. Do not grant new authority just to make recovery work.
+3. Reconnect once and wait for the canonical snapshot. Resolve competing-owner
+   errors by identifying/stopping the correct process, not deleting lock files.
+4. Inspect the terminal outcome, pending choices, verification and known usage.
+   Independently inspect files/external effects before repeating a mutation.
+5. If a native run was interrupted, its old cursor is gone. Only after inspection,
+   choose a new turn or explicit =/resume= and expect new approvals and provider cost.
+6. For a deliberate config change or receipt-limit exhaustion, use a new private
+   state directory; keep previous state for provenance rather than editing it away.

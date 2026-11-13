@@ -1,0 +1,78 @@
+:PROPERTIES:
+:ID: 0709245b-2a4b-44df-b85b-4d7884380594
+:END:
+#+TITLE: AgentProlog Wiki
+#+CREATED: [2026-11-12 Thu 22:08]
+#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: documentation
+#+ROAM_VISIBILITY: private
+#+CENSOR_PROFILE: strict
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:ae838c7115e0f20a4647d26bed170cc3510bf284c9e0574fb4cf1470513d1907; repository target docs/wiki/Home.org; source links in body
+#+AI_GENERATED: t
+#+AI_TAG: ai_a9145740106fe469
+#+FILETAGS: :ai:ai_a9145740106fe469:agentprolog:prolog-runtime:documentation:home:
+
+#+PROPERTY: header-args :eval never-export
+#+options: toc:2 num:nil
+
+* Start here
+
+AgentProlog is the agent application. Prolog-RLM is its reusable execution
+runtime. This wiki documents the implementation in this checkout, including
+trusted Prolog configuration, named agents, native skills, local packages,
+workspace tools, approvals, sessions and programmatic clients.
+
+The pages are ordinary Org files in Git: read them in Emacs or a repository
+viewer. This is a repository-backed wiki, not a separately published website.
+
+| Your goal | Read |
+|-----------+------|
+| Install and start a session | [[file:installation.org][Installation]], then [[file:getting-started.org][Getting started]] |
+| Build a complete small application | [[file:tutorial-todo-app.org][CRUD todo-app tutorial]] |
+| Configure everything in Prolog | [[file:configuration-reference.org][Configuration reference]], then [[file:configuration-cookbook.org][Configuration cookbook]] |
+| Define custom agent profiles | [[file:agents.org][Custom agents]] |
+| Choose providers and bound work | [[file:providers-and-budgets.org][Providers and budgets]] |
+| Author or import skills | [[file:skills.org][Native skills]], [[file:markdown-import.org][Markdown import]] |
+| Reuse trusted local code | [[file:packages-and-plugins.org][Packages and plugins]] |
+| Drive a session from a script | [[file:scripting.org][Scripting]], [[file:api-reference.org][API reference]] |
+| Understand permissions and recovery | [[file:security-and-approvals.org][Security and approvals]], [[file:sessions-and-recovery.org][Sessions and recovery]] |
+| Diagnose a problem | [[file:troubleshooting.org][Troubleshooting]] |
+| Extend or test the implementation | [[file:architecture.org][Architecture]], [[file:development-and-testing.org][Development and testing]] |
+| Connect another product surface | [[file:integrations.org][Integrations]] |
+
+* A useful reading order
+
+1. Install the pinned toolchain and run the CLI help.
+2. Start with no tools or a read-only configuration.
+3. Read the trust boundary before loading a Prolog plugin or package.
+4. Pick a named agent and configure explicit capability/budget ceilings.
+5. Add native skills through the existing compiler, not executable model text.
+6. Follow the todo tutorial and independently test the generated application.
+7. Use the canonical client for scripting; the terminal CLI is interactive.
+
+* What the application does, and does not promise
+
+- The Prolog-RLM runtime owns model/tool execution, capabilities, authority,
+  cancellation, budgets and durable effect semantics. A UI is not another engine.
+- Operator and plugin Prolog is explicitly trusted executable code. Native skill
+  documents are inert data and do not grant capabilities.
+- A completed model turn is not proof that its artifact meets requirements.
+  The todo acceptance example checks actual HTTP CRUD behavior separately.
+- A runtime USD target is reported-usage accounting, not a guaranteed provider
+  billing reservation. A previous manual authorization is not future spend consent.
+- The small todo target uses in-memory storage. Its HTTP behavior and HTML page
+  are checked; browser interactions and restart persistence are not claimed.
+- Native skill/system-instruction projection currently uses non-streaming model
+  callbacks. Other turns retain the existing streaming path.
+- Local documentation and examples do not imply that these branch changes are
+  merged, deployed, publicly published, or production-ready in every environment.
+
+* Navigation and source
+
+- [[file:_Sidebar.org][All wiki pages]]
+- [[file:../README.org][Documentation map and deeper implementation notes]]
+- [[file:../../README.org][Repository overview]]
+- [[file:../../prolog/agentprolog_config.pl][Configuration implementation]]
+- [[file:../../prolog/agentprolog_session.pl][Session implementation]]
+- [[file:../../scripts/check.sh][Deterministic verification entrypoint]]

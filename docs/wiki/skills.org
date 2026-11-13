@@ -1,0 +1,237 @@
+:PROPERTIES:
+:ID: d7df4428-8a20-43d8-9724-43a50531ba37
+:END:
+#+TITLE: Skills: inert prompt data
+#+CREATED: [2026-11-12 Thu 22:08]
+#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: documentation
+#+ROAM_VISIBILITY: private
+#+CENSOR_PROFILE: strict
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:b39edba66abd2454eb6104fe685713ffa2335a970aab20a781e5373126513142; repository target docs/wiki/skills.org; source links in body
+#+AI_GENERATED: t
+#+AI_TAG: ai_5a8f0ddb9dd5a664
+#+FILETAGS: :ai:ai_5a8f0ddb9dd5a664:agentprolog:prolog-runtime:documentation:skills:
+
+#+PROPERTY: header-args :eval never-export
+
+* What a native skill is
+
+A native skill file is a serialization of Prolog-RLM's canonical =prompt_unit=
+compiler input. It is not an executable Prolog module, another skill language,
+or an authority grant. AgentProlog reads terms with =read_term/3=; it never
+consults a skill file. Rules, initialization directives, and module directives
+are not a valid native document.
+
+| Input | Interpretation | Trust boundary |
+|-------+----------------+----------------|
+| =agentprolog_skills([...]).= | Inert prompt-unit data | Validated, bounded data |
+| =agentprolog_config/1= plugin | Executable configuration | Operator explicitly trusts code |
+| =prolog/agentprolog_plugin.pl= in a local pack | Executable configuration | =--package DIR= explicitly trusts code |
+| Markdown =SKILL.md= package | Import source, not native configuration | Bounded upstream parser, no script execution |
+
+See [[file:packages-and-plugins.org][Packages and plugins]] for executable extensions and
+[[file:markdown-import.org][Markdown import]] for conversion. A skill's text can guide a model;
+it cannot create a tool handler, expand capabilities, bypass approval, or start
+an MCP server. Execution authorization remains with the runtime.
+
+* A complete small native example
+
+Save this data as =skills/checklist.pl= in a project:
+
+#+begin_src prolog
+agentprolog_skills([
+    prompt_unit{
+        unit:skill(checklist),
+        description:"Review an implementation against its acceptance checklist.",
+        content:"List the acceptance criteria. Check each against supplied evidence. Report missing evidence explicitly; do not claim tests ran unless their results are available.",
+        aliases:["acceptance review"],
+        triggers:[trigger(keyword("checklist"),100)],
+        priority:100
+    }
+]).
+#+end_src
+
+Save the following executable, operator-reviewed configuration as
+=.agentprolog/config.pl=:
+
+#+begin_src prolog
+:- module(my_checklist_configuration,[agentprolog_config/1]).
+
+agentprolog_config(_{
+    skill_files:['../skills/checklist.pl'],
+    selected_skills:[checklist]
+}).
+#+end_src
+
+Relative =skill_files= paths are resolved against the file that declares them,
+not the shell's current directory. Here the declaring file is inside
+=.agentprolog/=, so =../skills/checklist.pl= reaches the project skill file.
+The same resolution applies inside named-agent layers.
+
+Start the packaged application from this repository, substituting the reviewed
+project directory:
+
+#+begin_src sh
+nix run . -- --project /absolute/path/to/project --trust-project
+#+end_src
+
+Submitting an objective can call the configured provider; the configuration
+above does not configure credentials or supply tool grants. For provider and
+operator settings, see [[file:configuration-reference.org][Configuration reference]] and
+[[file:configuration-cookbook.org][Configuration cookbook]].
+
+To validate the data without starting a session or calling a provider, run in an
+environment with the pinned =prolog-rlm-swipl= launcher:
+
+#+begin_src sh
+prolog-rlm-swipl -q -s prolog/agentprolog_skills.pl \
+  -g "load_skill_units(['/absolute/path/to/project/skills/checklist.pl'],[U]),get_dict(unit,U,Identity),writeln(Identity),halt"
+#+end_src
+
+Run this from the AgentProlog repository root. Successful loading alone is not
+proof that a later provider request contains the skill.
+
+* Native format, validation, and provenance
+
+The file must contain exactly one =agentprolog_skills(List).= term followed by
+end-of-file. Every list element must be a dict with =unit:skill(Name)= where
+=Name= is an atom, and =content= must be a Prolog string (double quotes).
+Ground data is required by upstream effect normalization; variable dict tags
+are normalized, not executable code. Use the explicit =prompt_unit{...}= tag
+shown above for clarity.
+
+| Bound or rule | Native loader behavior |
+|---------------+------------------------|
+| Input file count | At most 64 |
+| Each file | At most 1,048,576 bytes |
+| Total units across files | At most 128 |
+| Each =content= body | At most 32,768 UTF-8 bytes |
+| Identity | =skill(Name)= with an atom name; identities unique across all files |
+| Self-pinning | =mandatory_context:true= and =activation:always= rejected |
+| Host-owned fields | Forces =kind:skill=, =mandatory_context:false=, =provider_visible:true= |
+| Compiler validation | Every unit is registered in a temporary upstream catalog |
+
+Do not confuse these limits with the different Markdown package limits. The
+native loader does not impose the Markdown skill-name grammar: its immediate
+identity check requires an atom, followed by upstream compiler validation.
+Quote hyphenated names, for example =skill('build-todo')= and
+=selected_skills:['build-todo']=.
+
+Optional canonical fields include =description=, =category=, =available=,
+=activation:relevant=, =aliases=, =triggers=, =requires=, =suggests=,
+=conflicts=, =supersedes=, =requires_capability=, =priority=, and
+=representations=. These are compiler metadata, not callbacks. Defaults and
+validation come from the pinned upstream compiler, not a separate product
+schema. For example, aliases are limited to 32 entries of at most 128
+characters; descriptions to 2,048 characters. The native body byte limit
+still applies even though the upstream content limit is character-based.
+Prefer the small format above rather than relying on undocumented extra keys.
+
+On every native load, the loader computes the whole file's SHA-256 and replaces
+=provenance= with text shaped like:
+
+#+begin_example
+native(PATH,sha256:HASH,source:PRIOR_PROVENANCE)
+#+end_example
+
+If no original provenance exists, the prior value is =native=. Imported units
+retain the Markdown source path and fingerprint inside this wrapper. Hashes
+identify content; they are not signatures or proof that instructions are safe.
+Upstream catalog provenance is a bounded display string (512 characters), so
+retain original files rather than treating displayed provenance as a complete
+audit archive.
+
+The configuration loader resolves native files as readable paths and records
+them in =Config.sources=. Unlike the Markdown source loader, it does not
+confine native paths to the project or apply a descendant-symlink policy.
+Review the resolved paths in trusted configuration. The session binds its
+configuration and source hashes; changing a skill file can invalidate reconnect
+against existing session state.
+
+* Explicit selection versus contextual selection
+
+=skill_files= supplies candidates. =selected_skills= asks the compiler to admit
+particular identities. Without explicit selection, the canonical compiler uses
+the objective, lexical metadata matches, triggers, priorities, dependencies,
+suggestions, conflicts, supersession, availability, capabilities, and scope.
+Simply mentioning a skill in prose is not the same as supplying
+=selected_skills=, and registration is not activation.
+
+#+begin_src prolog
+% Contextual routing: offer the checklist, but do not explicitly request it.
+agentprolog_config(_{skill_files:['../skills/checklist.pl']}).
+#+end_src
+
+This is an alternative configuration clause, not a second solution to add to
+the earlier =agentprolog_config/1=. That predicate must return exactly one
+configuration dict.
+
+Explicit selection adds evidence; it does not override =available:false=,
+capability eligibility, dependency failure, conflicts, or other compiler
+rejections. A requested skill absent from =Compiled.selected_units= produces
+=agentprolog_skills(selection_rejected(skill(Name)))= before a provider call
+in the projection path. Loading the configuration alone does not validate that
+every selected name exists. If neither skills nor a system prompt are present,
+the projection shortcut returns the original runtime options; do not rely on a
+bare =selected_skills= list as an existence check.
+
+Skills cannot pin themselves into every request. The trusted host can supply
+=system_prompt=, which it registers separately as the always-active, mandatory
+=instruction(agent_configuration)= unit. A skill's request for
+=requires_capability= only restricts its eligibility; it never grants that
+capability.
+
+* What reaches the provider
+
+When native skill files or a nonempty system prompt are configured,
+=prepare_runtime_options/4=:
+
+1. Loads the native units and registers them with the single upstream compiler.
+2. Registers the existing runtime tool-registry schemas as compiler input.
+3. Registers the trusted system instruction, if any, and compiles against the
+   current objective and configured capabilities.
+4. Packs compiler context with a token limit equal to
+   =max(1,min(4096,max_total_tokens//4))=, zero output reserve/margin, and
+   =overflow:deny=.
+5. Renders compiled text into one system message and prepends it through the
+   configured model/planner callbacks or canonical provider wrapper.
+
+This projection callback is deliberately non-streaming. It does not implement
+provider transport, another agent loop, or a second selector. The product's
+projection call uses the compiler defaults; it does not pass the runtime
+=prompt_compile_mode= setting into this particular compilation call.
+
+Important implementation boundary: explicit selection is checked against
+=selected_units=, not =active_units= after packing. Native skills are optional
+context, so compiler admission is not a guarantee of final packed visibility.
+Keep bodies concise; inspect actual request evidence when visibility matters.
+The existing regression test verifies that a small selected skill and trusted
+system instruction appear in a projected provider request without a live call.
+
+* Troubleshooting
+
+| Symptom | Check or corrective action |
+|---------+----------------------------|
+| =invalid_document(Path)= | Use one wrapper term, a final period, and no directives/rules or second term. |
+| =expected_skill_unit= | Use =unit:skill(atom_name)=, not a bare name or string identity. |
+| =expected_content= | Supply a string body, not an atom or =none=. |
+| =body_too_large(Name)= / =file_too_large(Path)= | Check UTF-8 bytes, not just visible characters. |
+| =too_many_files= / =too_many_skills= | Reduce the aggregate input; limits apply across configured layers. |
+| =duplicate_skill= or compiler duplicate error | Rename/remove duplicate identities, even if they occur in different files or layers. |
+| =forbidden_policy(...)= | Remove mandatory/always policy; put trusted persistent policy in host configuration. |
+| =selection_rejected(skill(Name))= | Check exact quoted name, availability, required units/capability, and conflicts. |
+| Skill loaded but does not appear | Separate registration, relevance, selection, and token packing; inspect request evidence. |
+| =session_configuration_mismatch= after editing a skill | Use a separate intentional state directory for the new configuration; do not bypass the binding. |
+
+* Sources and related pages
+
+- [[file:../../prolog/agentprolog_skills.pl][Native loader and import conversion]]: =load_skill_units/2=, =native_unit/4=.
+- [[file:../../prolog/agentprolog_prompt.pl][Compiler/provider projection]]: =prepare_runtime_options/4=, =compile_context/7=.
+- [[file:../../prolog/agentprolog_config.pl][Configuration loading and relative paths]].
+- [[file:../../prolog/agentprolog_session.pl][Session source-hash binding]].
+- [[file:../../test/agentprolog_skills_test.pl][Inertness, policy, selection, and request-projection regression tests]].
+- [[file:../../examples/packs/coding/skills/build-todo.pl][Real native skill example]].
+- Upstream =rlm_prompt_compiler.pl= and =rlm_skill.pl= at the revision pinned in
+  [[file:../../flake.nix][flake.nix]] (=4716ba8aa0bbf3fa1b96d80e8ed8e91d99973c85=).
+- [[file:agents.org][Named agents]], [[file:scripting.org][Scripting]], [[file:Home.org][Wiki home]].

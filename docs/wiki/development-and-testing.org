@@ -1,0 +1,181 @@
+:PROPERTIES:
+:ID: ae10b8ee-76d9-435f-bca4-7a0f2e284622
+:END:
+#+TITLE: Development and testing
+#+CREATED: [2026-11-12 Thu 22:31]
+#+LAST_MODIFIED: [2026-11-12 Thu 22:31]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: documentation
+#+ROAM_VISIBILITY: private
+#+CENSOR_PROFILE: strict
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:7ca1fd00ed0ea6a234cf796b7506348ddc5166fa0c27260bbb67ec33c6f53c93; repository target docs/wiki/development-and-testing.org; source links in body
+#+AI_GENERATED: t
+#+AI_TAG: ai_fcf2360354c4c55d
+#+FILETAGS: :ai:ai_fcf2360354c4c55d:agentprolog:prolog-runtime:documentation:development-and-testing:
+
+#+PROPERTY: header-args :eval never-export
+#+description: Build outputs, exact-pin checks, CI lanes and honest acceptance evidence.
+
+[[file:Home.org][Wiki home]] · [[file:architecture.org][Architecture]] · [[file:api-reference.org][API reference]] · [[file:integrations.org][Integrations]]
+
+* Development environment
+
+Run commands below from the repository root unless a command explicitly changes its working directory. The source of packaging truth is [[file:../../flake.nix][flake.nix]], with dependency resolution in [[file:../../flake.lock][flake.lock]].
+
+#+begin_src sh
+nix develop
+nix flake check --print-build-logs
+nix build .#agentProlog --print-build-logs
+nix run .#agentProlog -- --help
+#+end_src
+
+These commands may fetch/build Nix dependencies but do not themselves request a model completion. The development shell contains the upstream runtime, Node 22, Python 3 for documentation checks, and the skill importer; it does not list the application/session launcher as additional shell packages. Python is a verification/documentation dependency, not the production agent runtime. Use the packaged application or supply a deliberately constructed local launcher for source-level CLI work.
+
+The runtime input is pinned in =flake.nix= to =4716ba8aa0bbf3fa1b96d80e8ed8e91d99973c85= at the documented source revision. Treat that file and =flake.lock= as authority if the pin changes; historical prose is not a dependency selector. =scripts/check.sh= verifies a supplied local runtime checkout's HEAD against the exact revision in =flake.nix= before running tests. This comparison alone is not a clean-worktree check of that external checkout.
+
+* Nix output reference
+
+Outputs are generated for =flake-utils.lib.eachDefaultSystem=. A declared output is not a claim that every system has current hosted build evidence.
+
+| Namespace | Attribute | Executable / meaning |
+|-----------+-----------+----------------------|
+| =packages= | =default=, =agentProlog=, =conversation-ui= | Same =agentProlog= terminal application; exports =AGENTPROLOG_SESSION= pointing at the bundled host |
+| =packages= | =session-host= | =agentprolog-session= SWI wrapper, with local Prolog library path and pinned upstream |
+| =packages= | =import-skill= | =agentprolog-import-skill SKILL_ROOT OUTPUT.pl= |
+| =packages= | =agentProlog-zara-runtime= | =agentprolog-zara-runtime= wrapper around upstream =prolog-rlm-zara --profile agentprolog= |
+| =apps= | =default=, =agentProlog=, =conversation= | Application launch aliases |
+| =apps= | =import-skill= | Skill importer launch alias |
+| =apps= | =zara-runtime= | Optional upstream runtime profile launcher |
+| =devShells= | =default= | Upstream runtime, =nodejs_22=, Python 3, importer |
+| =checks= | =conversation-cli=, =default-app= | Packaged CLI =--help= canonical UI smoke checks |
+| =checks= | =generic-native= | Seven local Prolog suites, including documented configurations |
+| =checks= | =documentation= | Org links/provenance, checker unit tests, actual tutorial configuration loading without model calls |
+| =checks= | =documented-scripts= | Canonical-client scripting examples against deterministic subprocess fixtures |
+| =checks= | =native-skill-import= | Import repository Markdown skill and read resulting native unit |
+| =checks= | =runtime-load= | =use_module(library(rlm))= in isolated temporary HOME |
+| =checks= | =zara-runtime-profile= | Upstream descriptor has runtime =prolog-rlm= and profile =agentprolog=; wrapper help works |
+
+=nix flake check= does not currently run every JavaScript package test, generic JS-to-native E2E, downstream harness E2E or live provider acceptance. Use the explicit gates below as well. No Nix output currently packages a complete DeepSeek Harness installation/plugin profile bundle.
+
+* Recommended deterministic gate
+
+Prerequisites: SWI-Prolog, a compatible Node installation, Python 3, npm (the installed CLI fixture uses local npm installation), and the exact pinned Prolog-RLM checkout. No provider credential is needed.
+
+#+begin_src sh
+bash scripts/check.sh /absolute/path/to/pinned/prolog-rlm
+#+end_src
+
+[[file:../../scripts/check.sh][The script]] performs:
+
+1. Exact runtime HEAD comparison against =flake.nix=.
+2. Org documentation link/provenance checks and Python checker unit tests.
+3. Extract the tutorial's two complete Prolog modules and load them through the actual configuration API, without provider calls.
+4. Seven Prolog suites using =-p library= pointed at that runtime source.
+5. =node --test test/*.test.js= for each JS package: DeepSeek Harness, Zara profile and conversation UI, including scripting examples.
+6. Conversation UI =generic.runtime.js= and =native.runtime.js= in actual SWI child processes.
+7. Whitespace/error checking with =git diff --check=.
+
+The script does not invoke =downstream.runtime.js=, =live-acceptance.js= or =todo-app-acceptance.js=.
+
+* Focused tests
+
+#+begin_src sh
+node --test packages/deepseek-harness/test/*.test.js
+node --test packages/zara-profile/test/*.test.js
+node --test packages/conversation-ui/test/*.test.js
+#+end_src
+
+The runtime suites use package-relative paths internally; run them from their package directory:
+
+#+begin_src sh
+cd packages/conversation-ui
+PROLOG_RLM_SOURCE=/absolute/path/to/pinned/prolog-rlm npm run test:generic
+PROLOG_RLM_SOURCE=/absolute/path/to/pinned/prolog-rlm npm run test:runtime
+#+end_src
+
+For local Prolog changes, the same library-path pattern used by =scripts/check.sh= is the supported source checkout test setup:
+
+#+begin_src sh
+swipl -q -p library=/absolute/path/to/pinned/prolog-rlm/prolog \
+  -s test/agentprolog_config_test.pl \
+  -s test/agentprolog_agents_test.pl \
+  -s test/agentprolog_skills_test.pl \
+  -s test/agentprolog_check_tool_test.pl \
+  -s test/documented_configs_test.pl \
+  -s test/agentprolog_session_test.pl \
+  -s test/agentprolog_workspace_tools_test.pl -g 'run_tests,halt'
+#+end_src
+
+* What each evidence class proves
+
+| Class | Sources / commands | Real execution | Not established |
+|-------+--------------------+----------------+-----------------|
+| JS unit/adversarial | Each package's =test/*.test.js= | Validation, projection, fake child-process transport, compatibility/lifecycle behavior; todo checker controls also start deterministic HTTP fixture programs | Fresh provider I/O, actual Harness UI integration, production readiness |
+| Local Prolog unit | [[file:../../test/][test/agentprolog_*_test.pl]] | Actual loader, compiler projection, file/process adapters, checkpoint logic, trusted fake model callbacks | Live model reliability; private predicates exercised by tests are not public APIs |
+| Official native fixture | [[file:../../packages/conversation-ui/test/native.runtime.js][native.runtime.js]] / =npm run test:runtime= | Actual SWI fixture process; compare JS state with upstream canonical reducer; CLI/crash/malformed input | Real model/tool execution or profile authorization; fixture events are synthetic |
+| Generic native E2E | [[file:../../packages/conversation-ui/test/generic.runtime.js][generic.runtime.js]] / =npm run test:generic= | Actual product host, native registry/effects/authority, files and approvals, installed CLI; model I/O deliberately mocked | Fresh provider calls or arbitrary project behavior |
+| Downstream synthetic | [[file:../../packages/conversation-ui/test/downstream.runtime.js][downstream.runtime.js]] / =npm run test:downstream= | External pinned fixture adapter plus native runtime and typed report lifecycle | Live research/provider execution, publication, validation of arbitrary downstream versions |
+| Live filesystem acceptance | [[file:../../packages/conversation-ui/test/live-acceptance.js][live-acceptance.js]] | Explicitly authorized real Z.AI model I/O, ordered read/create/modify/write/readback and actual bytes | Todo app generation, browser UX, a universal production-readiness certificate |
+| Live todo acceptance | [[file:../../packages/conversation-ui/test/todo-app-acceptance.js][todo-app-acceptance.js]] | Authorized selected provider, builder/package/skill, native source mutation/check, independent HTTP acceptance | Browser automation, durable application database, guaranteed provider billing ceiling |
+| Recorded todo recheck | [[file:../../packages/conversation-ui/test/verify-recorded-todo.js][verify-recorded-todo.js]] | Verify recorded checkpoint/provider/mutation hashes then freshly execute independent HTTP checks | A new model call, a new generation, or new hosted CI evidence |
+
+Native is not synonymous with live: a real SWI process and real filesystem can still use deterministic model callbacks. Conversely, a model claiming completion is not acceptance evidence. Read terminal =run.outcome.status=, inspect successful tool outcomes, verify actual file hashes, and independently test generated behavior.
+
+* Prolog suite responsibilities
+
+| Suite | Focus |
+|-------+-------|
+| [[file:../../test/agentprolog_config_test.pl][agentprolog_config_test.pl]] | Explicit trust, layer shape/conflicts, schema and capability/budget validation |
+| [[file:../../test/agentprolog_agents_test.pl][agentprolog_agents_test.pl]] | Agent inheritance/narrowing, unknown-agent rejection, local packs, operator grants and ceilings |
+| [[file:../../test/agentprolog_skills_test.pl][agentprolog_skills_test.pl]] | Inert native documents, rejecting directives/multiple terms, compiler selection, instruction/skill projection |
+| [[file:../../test/agentprolog_session_test.pl][agentprolog_session_test.pl]] | Native invocation, binding/recovery, failed hooks, RLM mode, safe error projection and failed-run usage |
+| [[file:../../test/agentprolog_workspace_tools_test.pl][agentprolog_workspace_tools_test.pl]] | Bounded file operations, hashes/path confinement, symlink/conflict handling |
+| [[file:../../test/agentprolog_check_tool_test.pl][agentprolog_check_tool_test.pl]] | Fixed syntax-check process, normalized confinement and checking rather than executing source |
+| [[file:../../test/documented_configs_test.pl][documented_configs_test.pl]] | Fifteen complete configurations, exact loader/grant/path/provider/skill/budget behavior without model calls |
+
+* CI lanes
+
+| Workflow | Trigger / scope | Actual checks |
+|----------+-----------------+---------------|
+| [[file:../../.forgejo/workflows/ci.yml][Forgejo AgentProlog CI]] | Forgejo PRs; pushes to =main= | Full =scripts/check.sh= gate, installed CLI, Nix checks, default package build/help and deterministic evidence upload |
+| [[file:../../.github/workflows/ci.yml][CI]] | PRs; pushes to =main= | Nix checks, application build and packaged help smoke |
+| [[file:../../.github/workflows/conversation-ui.yml][Canonical conversation UI]] | PRs; pushes to =main= | JS tests and installed help; exact runtime source checkout; SWI suites, generic E2E and official fixture; upload textual native evidence |
+| [[file:../../.github/workflows/deepseek-harness.yml][DeepSeek Harness bridge]] | Matching package/workflow paths on PRs and =main= pushes | Node 22 protocol/lifecycle tests, not a real full Harness installation |
+| [[file:../../.github/workflows/zara-profile.yml][Zara Runtime Profile]] | Matching package/workflow paths on PRs and =main= pushes | Node 22.19 profile contract tests |
+| [[file:../../.github/workflows/live-agent-acceptance.yml][Manual real-model agent acceptance]] | =workflow_dispatch= only | Exact reviewed commit + explicit existing-subscription authorization, runtime adapter preflight, bounded live filesystem gate, evidence upload |
+
+Checked-in workflows are intended gates, not proof that a particular commit passed on the hosting service. Do not transfer an older commit's green status to the current pin or claim that a manual workflow is registered on the default branch without checking the host.
+
+Forgejo selects the native =.forgejo/workflows/= directory; the =.github/=
+lanes above describe GitHub operation, including its manually authorized live
+workflow. The Forgejo automatic lane does not request live model acceptance or
+inherit credential-bearing dispatch merely from that GitHub file. Its installer
+action uses an explicit upstream URL because Forgejo's default action mirror
+does not contain the Determinate installer. Runtime checkout uses the canonical
+Forgejo =nsaspy/prolog-rlm= at the same exact flake SHA; GitHub uses
+=lost-rob0t/prolog-rlm=. Neither mapping changes the selected runtime revision.
+
+* Downstream integration is opt-in
+
+The downstream lane requires =AGENTPROLOG_HARNESS_ROOT= and =PROLOG_RLM_SOURCE= pointing at exact checkouts from [[file:../../packages/conversation-ui/test/integration-pins.json][integration-pins.json]]. It asserts those HEADs before execution. This is a synthetic compatibility lane, not a request to fetch data or run live research. Keep downstream business logic/schema authority with its owner; do not move its tools into the generic product.
+
+* Live and recorded acceptance safety
+
+Neither ordinary unit tests nor default PR/push workflows call providers. Live entrypoints fail without their explicit opt-in and existing credential. Authorization for an earlier invocation does not authorize another one. Do not run them merely to make a documentation change green.
+
+The manual filesystem lane uses a fixed upstream Z.AI Coding Plan constructor and model, with no fallback. The todo lane explicitly selects =openrouter= or =zai_coding=; it permits at most three generation/verification-driven turns, retains original requirements for repairs and blocks automatic repair on unknown cost. Runtime =max_cost_usd= and per-invocation accounting are guards based on reported usage, not provider-enforced billing reservations or a cap across separately started invocations.
+
+The independent [[file:../../packages/conversation-ui/test/todo-app-proof.js][todo checker]] syntax-checks =app.mjs= and imports its exported =createServer()= in a separate clean-environment Node process. It checks real loopback HTTP CRUD, validation and other-todo isolation. Node permission flags and heap limits are not an OS/network sandbox. HTML/input/script presence is checked; browser interactions are not automated.
+
+Recorded rechecks make no provider call, but they execute existing generated code and write =evidence.json= in the selected artifact directory. Use only a reviewed isolated artifact. The current recorded verifier deliberately requires the recorded route =openrouter= / =openai/gpt-4.1-mini=; it is not a provider-agnostic evidence importer.
+
+* Known development pitfalls
+
+- =snapshot_required= immediately after connection indicates readiness/handshake problems, not permission to bypass checks. =connect()= must await negotiation plus snapshot; see [[file:../../packages/conversation-ui/test/transport.test.js][transport tests]].
+- A new source/configuration binding requires a new state directory or intentionally managed migration; do not delete an operator's old checkpoint to hide a mismatch.
+- A completed stream may contain a failed/rejected/interrupted native outcome. Assertions should use =run.outcome.status= and concrete observations, not the word “finished.”
+- =workspace_check= reports syntax only. =exit_code:0= does not establish HTTP behavior or task correctness.
+- The todo checker uses stable Node =--permission=; obsolete permission flags are not a compatible substitute. Use the supported Node range and positive checker fixture, not just negative tests.
+- Configured native skills/system prompts currently use non-streaming model projection. Lack of incremental text there does not imply a second provider loop is needed.
+
+For API signatures, CLI options and trust boundaries, see [[file:api-reference.org][API reference]].
