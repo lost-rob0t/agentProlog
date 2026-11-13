@@ -273,7 +273,7 @@ async function driveCli(t, scenario, steps) {
 
 test('CLI /answer menu answers the newest pending question by number', async t => {
   const run = await driveCli(t, 'menu', [
-    { send: 'go', logHas: f => f.command === 'session.turn' },
+    { send: 'go', stdout: /Pending: question q_main/ },
     { send: '/answer', stdout: /answer q_follow>/ },
     { send: '1', logHas: f => f.command === 'question.answer' },
   ]);
@@ -281,7 +281,8 @@ test('CLI /answer menu answers the newest pending question by number', async t =
   const answers = (await run.frames()).filter(f => f.command === 'question.answer');
   assert.equal(answers.length, 1);
   assert.deepEqual(answers[0].payload, { question_id: 'q_follow', answer: 'fast' });
-  assert.match(run.stdout(), /Which provider\?/);
+  assert.match(run.stdout(), /Priority\?/);
+  assert.match(run.stdout(), /\[1\] fast  \[2\] slow/);
 });
 
 test('CLI /answer list selects any pending question and shows answered history read-only', async t => {
