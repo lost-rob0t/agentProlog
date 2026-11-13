@@ -1,0 +1,283 @@
+:PROPERTIES:
+:ID: 9628b99c-6326-413e-b64e-c11cf142fefc
+:END:
+#+TITLE: API reference
+#+CREATED: [2026-11-12 Thu 22:08]
+#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: documentation
+#+ROAM_VISIBILITY: private
+#+CENSOR_PROFILE: strict
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:634ad7f0f9ac2fa294436d8f9983e22572cde04f74781ba79fb38fcb8190447e; repository target docs/wiki/api-reference.org; source links in body
+#+AI_GENERATED: t
+#+AI_TAG: ai_8794e6a3daa04090
+#+FILETAGS: :ai:ai_8794e6a3daa04090:agentprolog:prolog-runtime:documentation:api-reference:
+
+#+PROPERTY: header-args :eval never-export
+#+description: Local Prolog exports, callback ABIs, canonical client, wire commands and CLI.
+
+[[file:Home.org][Wiki home]] · [[file:architecture.org][Architecture]] · [[file:development-and-testing.org][Development and testing]] · [[file:integrations.org][Integrations]]
+
+* Scope and trust
+
+This reference enumerates the repository's six library modules under =prolog/= and their declared exports, plus the executable importer, example configuration callbacks and application JS surface. Exported does not mean remotely callable: the canonical wire accepts only the commands listed below. Upstream Prolog-RLM APIs are much broader; they are not automatically product-exposed.
+
+=+= marks input, =-= output. Callback closures are module-qualified, ground trusted Prolog callables; extra arguments shown below are appended by =call/N=. Configuration modules execute arbitrary Prolog when loaded. These APIs are not a sandbox and must not be supplied by model-generated source or remote request frames.
+
+* Public local Prolog modules
+
+** Configuration
+
+Source: [[file:../../prolog/agentprolog_config.pl][agentprolog_config.pl]].
+
+| Module | Export | Signature | Purpose / contract |
+|--------+--------+-----------+--------------------|
+| =agentprolog_config= | =default_configuration/1= | =default_configuration(-Config)= | Return generic direct-mode defaults with no tools/capabilities/runtime options, default budgets and no selected agent/skills |
+| =agentprolog_config= | =load_configuration/3= | =load_configuration(+Project, +Options, -Config)= | Resolve project; load explicitly trusted options/layers/packs; validate grants, ceilings, agents and skills; record source paths |
+| =agentprolog_config= | =register_config_tools/2= | =register_config_tools(+Config, +Registry)= | Register =Config.tools= into an existing upstream registry; throw on registration failure; does not create/destroy registry or grant capabilities |
+
+=Options= accepts =plugin(Path)=, =package(Root)=, =agent(Name)=, =trusted_project(Boolean)=, =allowed_capabilities(List)=, =budget_limits(Dict)= and =budget_ceiling(Dict)=. Before normal option validation, a single =config_file(Path)= loads a module exporting =agentprolog_options/1=. Duplicate singleton options are errors; CLI-supplied singletons do not silently override matching operator-file options. =plugin= and =package= may repeat with distinct admitted sources/packages.
+
+Each consulted product source must begin with a module declaration exporting =agentprolog_config/1= and yield exactly one layer dict. Operator files analogously export =agentprolog_options/1= and yield exactly one option list. Layer/runtime keys are allow-listed in the source. Tool callbacks and artifact hooks must be qualified; names/capabilities cannot be manufactured by a remote command. A named agent cannot increase its parent's capabilities or budget.
+
+Safe inspection, from a trusted checkout with the upstream library already available:
+
+#+begin_src prolog
+:- use_module(prolog/agentprolog_config).
+
+% No project files are consulted and no model request is made here.
+?- default_configuration(C), Profile = C.profile, Caps = C.capabilities.
+% Profile = generic, Caps = [].
+#+end_src
+
+To load a project use =load_configuration('/absolute/reviewed-project', [], C)= only after checking that it has no untrusted project config. If =.agentprolog/config.pl= exists, absent explicit trust is an error. Never add =trusted_project(true)= just to suppress that error.
+
+** Native skills
+
+Source: [[file:../../prolog/agentprolog_skills.pl][agentprolog_skills.pl]].
+
+| Module | Export | Signature | Purpose / contract |
+|--------+--------+-----------+--------------------|
+| =agentprolog_skills= | =load_skill_units/2= | =load_skill_units(+Files, -Units)= | Read exactly one inert =agentprolog_skills(List)= term per file; validate unique skill units via upstream catalog; add native source/hash provenance |
+| =agentprolog_skills= | =import_markdown/2= | =import_markdown(+Root, +Output)= | Load Markdown catalog with upstream APIs; serialize prompt units; create new output without overwriting existing file |
+
+Bounds: at most 64 files and 128 units; each file at most 1 MiB and skill body at most 32768 UTF-8 bytes. Every raw unit must identify =skill(Name)= with an atom name and string content. =mandatory_context:true= and =activation:always= are rejected; native units are forced to skill/nonmandatory/provider-visible form. Other prompt-unit validity is delegated to the upstream catalog.
+
+#+begin_src prolog
+:- use_module(prolog/agentprolog_skills).
+
+% Reads data from this repository; does not consult it or call a provider.
+?- load_skill_units(['examples/packs/coding/skills/build-todo.pl'], Units).
+#+end_src
+
+[[file:../../prolog/agentprolog_import_skill.pl][agentprolog_import_skill.pl]] is an executable script with =initialization(main, main)=, not a named module with a public export list. Its =main/1= accepts exactly =[SkillRoot, Output]=; bad arity prints usage and exits 2. Prefer the packaged =agentprolog-import-skill= / =nix run .#import-skill -- ROOT OUTPUT.pl= entrypoint rather than importing script predicates.
+
+** Prompt projection
+
+Source: [[file:../../prolog/agentprolog_prompt.pl][agentprolog_prompt.pl]].
+
+| Module | Export | Signature | Purpose / contract |
+|--------+--------+-----------+--------------------|
+| =agentprolog_prompt= | =prepare_runtime_options/4= | =prepare_runtime_options(+Config, +Registry, +Objective, -Options)= | Compile configured system instruction/native skills and tool catalog through upstream compiler; return runtime options/wrapped callbacks; no model completion by this call |
+| =agentprolog_prompt= | =projected_request/3= | =projected_request(+ConfiguredClosure, +Request, -Projected)= | For an =agentprolog_prompt:configured_model(Provider,Messages,Handler)= closure, prepend compiled messages to =Request.messages= |
+| =agentprolog_prompt= | =configured_model/5= | =configured_model(+Provider, +Messages, +HandlerOrNone, +Request, -Outcome)= | Runtime callback implementation: forward through canonical upstream provider wrapper if =none=, otherwise project request then call trusted handler |
+
+=configured_model/5= can make a real provider call when used with =none=; it is not a harmless formatting helper. =projected_request/3= only matches the specific configured closure shape, not arbitrary callback terms. With no skill files and empty system prompt, =prepare_runtime_options/4= returns the original runtime options unchanged.
+
+Prompt context budget is derived from =max_total_tokens= and capped at 4096 context tokens; selected skills rejected by compilation fail before provider execution. Configured instruction/skill projection currently uses a non-streaming host callback. This forwards through upstream transport; it is not another provider or compiler implementation.
+
+** Workspace file tools
+
+Source: [[file:../../prolog/agentprolog_workspace_tools.pl][agentprolog_workspace_tools.pl]].
+
+| Module | Export | Signature | Purpose / contract |
+|--------+--------+-----------+--------------------|
+| =agentprolog_workspace_tools= | =workspace_tools/2= | =workspace_tools(+Root, -Tools)= | Resolve writable existing root; reject symlink chain; return four =tool(Schema,tool_handler(Preflight,Execute))= definitions |
+| =agentprolog_workspace_tools= | =preflight/5= | =preflight(+Root, +Operation, +Args, -Normalized, -Details)= | Validate path/content/preconditions; produce normalized args and authority details without mutating files |
+| =agentprolog_workspace_tools= | =execute/4= | =execute(+Root, +Operation, +Normalized, -Result)= | Revalidate normalized path/hash under mutex; perform read or atomic mutation; return observed result |
+
+=Operation= is =read= / =create= / =write= / =modify=. Preflight returns =_{path,absolute,before,content}= and details including target/project root, operation, prior hash and byte count. Execute expects those normalized arguments, not raw model arguments.
+
+These callbacks implement tool mechanics, not permission grants. Calling =execute/4= directly bypasses native mediation; application code should register the returned definitions and invoke them through the upstream runtime. Bounds/path checks are not an OS sandbox against hostile concurrent path replacement.
+
+| Tool | Raw arguments | Effect | Result |
+|------+---------------+--------+--------|
+| =workspace_read= | ={path}= | =read= | ={path,content,sha256,bytes}= |
+| =workspace_create= | ={path,content}= | =write= | ={path,sha256,bytes}=; no overwrite |
+| =workspace_write= | ={path,content,expected_sha256}= | =write= | Atomic replacement only when current hash matches |
+| =workspace_modify= | ={path,old_text,new_text,expected_sha256}= | =write= | Replace exactly one nonempty match with hash guard |
+
+Paths are workspace-relative, not absolute; traversal components, empty components, backslashes, control characters, symlinks and missing parent directories are rejected. Files/content are bounded to 65536 UTF-8 bytes. Write/modify execution rechecks prior content after approval waits.
+
+** Fixed syntax-check tool
+
+Source: [[file:../../prolog/agentprolog_check_tool.pl][agentprolog_check_tool.pl]].
+
+| Module | Export | Signature | Purpose / contract |
+|--------+--------+-----------+--------------------|
+| =agentprolog_check_tool= | =syntax_check_tool/3= | =syntax_check_tool(+Root, +Node, -Tool)= | Verify operator-selected Node executable and construct =workspace_check= definition |
+| =agentprolog_check_tool= | =preflight/4= | =preflight(+Root, +Args, -Normalized, -Details)= | Delegate confined read preflight for ={path}= |
+| =agentprolog_check_tool= | =execute/4= | =execute(+Root, +Node, +Normalized, -Result)= | Revalidate/read file, execute only =Node --check AbsolutePath=, return ={path,sha256,exit_code,output}= |
+
+It declares =effect:process=, no shell or model-selected command argv, =env([])=, a five-second internal timeout and bounded stderr. A nonzero syntax exit code is a result to inspect, not automatically a tool exception or a passing check. The schema declares an eight-second time limit and 12000-byte output budget; internal stderr reading is capped at 8192 characters. It checks syntax and does not execute the program.
+
+** Session host
+
+Source: [[file:../../prolog/agentprolog_session.pl][agentprolog_session.pl]].
+
+| Module | Export | Signature | Purpose / contract |
+|--------+--------+-----------+--------------------|
+| =agentprolog_session= | =main/1= | =main(+Argv)= | Parse host argv, load trusted configuration and run durable stdio service |
+| =agentprolog_session= | =serve/2= | =serve(+StateDirectory, +Config)= | Acquire exclusive state lock, open upstream effect store, initialize checkpoint, process canonical frames until EOF and clean up |
+| =agentprolog_session= | =session_event/2= | =session_event(+RunId, +CanonicalAgentEvent)= | Trusted runtime callback sink; under mutex accept/bound events only for the matching active running run, then project through upstream facade |
+
+=serve/2= is a blocking process-level entrypoint, not an embeddable multi-project server. Use one host process per project/configuration. =session_event/2= consumes upstream canonical =agent_event(...)= terms, not JSON event frames; consumers normally pass the partially applied closure =agentprolog_session:session_event(RunId)= to trusted runtime callbacks.
+
+* Callback ABIs
+
+| Owner / registration | Closure / appended arguments | Required behavior |
+|----------------------+------------------------------+-------------------|
+| Operator module | =Module:agentprolog_options(-Options)= | Export /1 and return exactly one list; explicitly trusted executable configuration |
+| Product/plugin/project/pack module | =Module:agentprolog_config(-Layer)= | Export /1 and return exactly one allowed-key dict |
+| Simple tool handler | =Module:Handler(+Args, -Value)= | Return schema-valid tool value, not =ok(Value)= wrapper; runtime handles registry/authority/effects |
+| =tool_handler(Preflight,Execute)= | =Preflight(+RawArgs,-Normalized,-Details)= then =Execute(+Normalized,-Value)= | Preflight normalizes/validates before native mediation; execute revalidates mutable preconditions |
+| =model_handler(Closure)= | =Closure(+ModelRequest,-Outcome)= | Trusted model-I/O seam; return upstream =ok(ModelResponse)= / error outcome, not final UI frames |
+| =planner_handler(Closure)= | =Closure(+ModelRequest,-Outcome)= | Same model request/response ABI for upstream planning/completion path; not a callback that owns the agent loop |
+| =hooks:_{validate_artifact:Closure}= | =Closure(+NativeResult,-Decision)= | Return =complete(ArtifactDict)= or =approval(ArtifactDict)=; failure/exception causes failed validation |
+| Text/event sink used by host | =agentprolog_session:session_event(RunId,+AgentEvent)= | Native semantic events enter canonical reducer; run guard drops late/inactive observations |
+
+Qualified closures may bind trusted extra parameters; for example =my_tools:read(ProjectRoot)= is called as =my_tools:read(ProjectRoot, Args, Value)=. Neither callback names nor executable parameters belong in model-selected wire options.
+
+Tested model responses include =provider=, =requested_model=, =selected_model=, =response_id=, =assistant=, =text=, =tool_calls=, =reasoning=, =reasoning_details=, =finish_reason=, =usage= and =metadata=. The assistant value is a native =message{role:assistant,content:...,tool_calls:...,...}=. Model requests carry =messages= (and upstream request fields/options); native calls use function name/JSON arguments. The authoritative request/response schema belongs upstream: see the concrete trusted fake in [[file:../../test/agentprolog_session_test.pl][session tests]] and [[file:../../packages/conversation-ui/test/support/generic_fixture.pl][generic fixture]]. These are deterministic model mocks, not provider implementations to copy into production.
+
+Artifact =approval(...)= is post-execution artifact review, distinct from native tool authority suspension. Accepting an artifact does not publish it. Neither artifact hooks nor skills may bypass native mutation approval.
+
+** Example module exports
+
+| Module | Export | Signature | Purpose |
+|--------+--------+-----------+---------|
+| =agentprolog_word_count= | =agentprolog_config/1= | =agentprolog_config(-Layer)= | Example typed read tool plus requested capabilities |
+| =agentprolog_word_count= | =count_words/2= | =count_words(+Args,-Result)= | Split =Args.text= on whitespace; return =_{count:Integer}= |
+| =agentprolog_coding_pack= | =agentprolog_config/1= | =agentprolog_config(-Layer)= | Example builder/reviewer agent layers and native skill selection |
+
+Sources: [[file:../../examples/plugins/word_count.pl][word_count.pl]], [[file:../../examples/packs/coding/prolog/agentprolog_plugin.pl][coding pack entrypoint]].
+
+#+begin_src prolog
+:- use_module(examples/plugins/word_count).
+
+% Pure callback demonstration on explicitly trusted example code.
+?- count_words(_{text:"one two"}, R).
+% R = _{count:2}.
+#+end_src
+
+Predicates such as =agentprolog_session:native_execute/4=, =initialize/2=, =checkpoint/1=, =config_binding/2=, =update/1=, =cli_options/2= and =agentprolog_workspace_tools:safe_path/3= are private implementation details. Tests call some with explicit module qualification; that does not promote them into supported public APIs. The test fixture's =configuration/3=, =model/4= and =validate/2= exports are test-only, not production configuration APIs.
+
+* JavaScript canonical client
+
+Source: [[file:../../packages/conversation-ui/src/client.js][client.js]]. The private ES-module package has a CLI bin, not a declared stable npm library export map; repository consumers can import the source module explicitly.
+
+| API | Signature | Behavior |
+|-----+-----------+----------|
+| Constructor | =new Client({command, args=[], timeoutMs=15000, requiredCapabilities=[]})= | Trusted executable/argv; creates EventEmitter and disposable projection; does not spawn yet |
+| =connect= | =await client.connect() -> negotiationResultFrame= | Close previous child, spawn without shell, negotiate and wait for canonical snapshot; concurrent connects share an in-flight attempt |
+| =request= | =await client.request(frame) -> resultFrame= | Low-level correlated request; connected required; supplies fresh UUID request ID and protocol; not a raw-goal API |
+| =command= | =await client.command(name, payload={}) -> resultFrame= | Ready snapshot required; uses current canonical session ID; locally rejects stale/non-offered approval/question decisions |
+| =close= | =await client.close()= | Invalidate generation/readiness, reject pending requests, SIGTERM child and escalate to SIGKILL after one second |
+
+Useful state: =client.view= (=Projection=), =connected=, =ready= and =descriptor= (negotiation payload). Presentation listeners receive =view= (updated projection), =result= (result/error frame), =fault= (error) and =diagnostic= (bounded stderr chunks). Raw diagnostics from an arbitrary external adapter may contain sensitive text; do not log them in credential-bearing acceptance runs.
+
+=command()= returning an accepted result does not mean the asynchronous run completed. Observe subsequent views and terminal outcome. Timeouts/disconnect reject pending requests, mark state stale and terminate the child; uncertain mutations are not automatically retried. =close()= is transport cleanup, not evidence that a run reached a successful terminal outcome.
+
+Safe minimal client example: this uses the checked-in deterministic transport fixture, not a provider or arbitrary executable.
+
+#+begin_src js
+// Run as an ES module from the repository root.
+import { Client } from './packages/conversation-ui/src/client.js';
+import { resolve } from 'node:path';
+
+const client = new Client({
+  command: process.execPath,
+  args: [resolve('packages/conversation-ui/test/fixtures/transport.mjs')],
+});
+client.on('fault', error => console.error(error.code));
+try {
+  await client.connect(); // negotiation AND snapshot are ready
+  console.log(client.view.sessionId, client.view.cursor);
+} finally {
+  await client.close();
+}
+#+end_src
+
+Other source-level exports are =Projection=, =ProtocolError=, =PROTOCOL=, =MAX_BYTES=, =requireValue=, =object=, =id= and =validateEnvelope= in [[file:../../packages/conversation-ui/src/projection.js][projection.js]]; =render(view, connected=true)= and =safe(value)= in [[file:../../packages/conversation-ui/src/render.js][render.js]]; and =HELP= / =main(argv)= in [[file:../../packages/conversation-ui/src/cli.js][cli.js]]. =Projection.snapshot(frame)= replaces local state with a validated clone; =event(frame)= applies the next canonical event and returns false for an old/duplicate sequence. Validation helpers are not general authorization APIs.
+
+* Canonical wire lifecycle
+
+Transport is newline-delimited UTF-8 JSON on stdio with =protocol:"prolog_agent_ui_v1"=. Requests/results correlate =request_id=; commands/results/snapshots/events use canonical =session_id=. stdout is protocol-only. This is distinct from the DeepSeek Harness numeric-version operation protocol.
+
+1. Client sends =kind:"negotiate"=, protocol versions, required/optional capabilities and optionally its previous cursor as =resume_from=.
+2. Host checks requested required capabilities, returns an =ok= result with advertised capabilities/profile and sends a canonical snapshot. The bundled host uses a full snapshot rather than replaying from =resume_from=.
+3. Client validates and installs the snapshot, then permits commands.
+4. Host emits ordered semantic events and command results. Events have =seq= / =event_id= / =event_type= / =payload=; snapshots have =snapshot_id= / =at_seq= / =state=.
+5. On reconnect the checkpoint replaces stale JS state. Session mismatch, event sequence gaps, malformed/oversized frames, missing required capabilities and unsupported required extensions fail closed.
+
+The client bounds frames to 1 MiB and collection sizes to 256. The bundled host imposes a stricter 65536-character input-line limit, 16000-character objectives/answers, bounded tool previews and bounded message text. These are implementation bounds, not permission to send arbitrary source. Optional unknown events require an extension namespace and =required:false=; required unknown semantics are rejected.
+
+Bundled host negotiation advertises =streaming_text=, =generic_tools=, =approvals=, =questions=, =verification=, =usage= and =traces=. The projection can render upstream subagent/effect-uncertainty events, but the bundled host does not advertise a subagent capability or expose arbitrary upstream APIs.
+
+| Command | Payload | Product behavior |
+|---------+---------+------------------|
+| =session.create= | ={}= | Return configured workspace ID and current canonical snapshot |
+| =session.select= | ={}= | Refresh the same configured session; not selection by arbitrary session ID |
+| =session.turn= | ={objective:string}= | Start fresh run, or ask a question for blank objective; reject while busy |
+| =session.resume= | ={}= | Start a new run for previous objective; missing objective/busy session rejected |
+| =session.cancel= | ={}= | Request native cancellation or end pending question/artifact review; no false success on cancellation |
+| =approval.decide= | ={approval_id,decision}= | Resolve current approval; bundled host decisions =allow_once= / =deny=, exact runtime offering required |
+| =question.answer= | ={question_id,answer}= | Answer current pending question with nonempty bounded text and start run |
+
+There is no generic =publish=, =load_config=, =eval=, =spawn_subagent=, provider-switch or shell-execution wire command. Normal results/errors use request correlation. Reused durable request IDs must have identical command/payload; conflicts reject. Admission persists before work dispatch so recovery can report uncertainty without automatically resubmitting effects.
+
+* CLI flags
+
+Authoritative parser/help: [[file:../../packages/conversation-ui/src/cli.js][cli.js]].
+
+| Flag | Argument / repeatability | Behavior |
+|------+--------------------------+----------|
+| =--help= | None | Print canonical UI help and exit before connecting |
+| =--project= | =DIR= | Bundled host project; default current directory; canonicalized |
+| =--state= | =DIR= | Bundled host state directory; default stable SHA-256 key of canonical project under XDG state root |
+| =--config= | =FILE= | Explicitly trusted operator module with =agentprolog_options/1= |
+| =--plugin= | =FILE=, repeatable | Explicitly trusted product configuration module |
+| =--package= | =DIR=, repeatable | Explicitly trusted local SWI pack |
+| =--agent= | =NAME= | Select named configuration; no scheduler/team creation |
+| =--trust-project= | None | Execute selected project's =.agentprolog/config.pl= if present |
+| =--allow-tool= | =NAME=, repeatable | Operator grants =tool(Name)=; does not register a missing tool |
+| =--allow-context= | =OP=, repeatable | Operator grants =context(Op)= |
+| =--allow-model= | =NAME=, repeatable | Operator grants =model(Name)=; not a provider/model selection flag |
+| =--sidecar= | =EXECUTABLE= | Use external canonical adapter instead of bundled host |
+| =--sidecar-arg= | =ARG=, repeatable | Exact external argv element; no shell parsing |
+
+No supported =--model=, =--provider=, =--budget=, =--prompt=, =--task=, =--headless= or short-option interface is implemented here. Configure runtime selection/budget ceilings with trusted Prolog. Missing values/unknown flags fail. Keep =--sidecar-arg= for external adapters; =--config= / plugin/package flags are incompatible with external mode.
+
+Environment: =AGENTPROLOG_SESSION= is the bundled host launcher (set by Nix application); =AGENTPROLOG_SIDECAR= selects an external adapter. =XDG_STATE_HOME= selects the state root, otherwise =~/.local/state= is used. =PROLOG_RLM_SOURCE= / =SWIPL= are test/development driver controls, not application CLI flags.
+
+Direct host argv is =agentprolog-session STATE_DIRECTORY PROJECT [options]=. Its parser supports =--allow-model=, =--allow-context=, =--allow-tool=, =--trust-project=, =--plugin=, =--package=, =--agent= and =--config=, even though its short usage string lists only trust/plugin flags. Use the UI's complete help for normal application invocation.
+
+* Slash commands
+
+| Command | Action |
+|---------+--------|
+| =/create= | =session.create= for configured session |
+| =/select= | =session.select= refresh |
+| =/resume= | Explicitly rerun prior objective as new run |
+| =/profile= | Print runtime negotiation descriptor/profile/capabilities |
+| =/inspect= | Render canonical session, tools, evidence and usage |
+| =/reconnect= | Restart connection and obtain canonical checkpoint |
+| =/cancel= | Request =session.cancel= |
+| =/approve ID DECISION= | Send exact offered approval decision; never guess a persistent grant |
+| =/answer ID TEXT= | Answer pending question |
+| =/help= | Print help |
+| =/quit= | Close sidecar and exit |
+
+Nonempty ordinary text submits =session.turn {objective}=. Blank CLI input does nothing; programmatic clients can send a blank objective to request a question. Unknown slash commands fail. There is no =/model=, =/workspace=, =/spawn= or =/publish= UI command.
+
+For the separate Harness and Zara APIs, see [[file:integrations.org][Integrations]]. For evidence scope and test commands, see [[file:development-and-testing.org][Development and testing]].

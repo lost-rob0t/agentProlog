@@ -30,8 +30,8 @@ const constructor = provider === 'openrouter'
   : `rlm_chain:zai_coding_provider(chat_completions,${quote(model)},Provider)`;
 await writeFile(join(workspace, '.agentprolog/config.pl'), `
 :- module(todo_acceptance_project,[agentprolog_config/1]).
-:- use_module(${quote(join(repo, 'prolog/agentprolog_workspace_tools.pl'))}).
-:- use_module(${quote(join(repo, 'prolog/agentprolog_check_tool.pl'))}).
+:- use_module(${quote(join(repo, 'prolog/agentprolog_workspace_tools.pl'))},[workspace_tools/2]).
+:- use_module(${quote(join(repo, 'prolog/agentprolog_check_tool.pl'))},[syntax_check_tool/3]).
 :- use_module(library(rlm_chain),[]).
 agentprolog_config(_{profile:todo_app,tools:Tools,
   capabilities:[tool(workspace_read),tool(workspace_create),tool(workspace_write),tool(workspace_check),context(peek)],

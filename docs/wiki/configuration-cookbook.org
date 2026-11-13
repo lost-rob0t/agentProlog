@@ -1,0 +1,402 @@
+:PROPERTIES:
+:ID: 9cbe34b5-738c-41a0-8def-1bdaba69c423
+:END:
+#+TITLE: Configuration cookbook
+#+CREATED: [2026-11-12 Thu 22:08]
+#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: documentation
+#+ROAM_VISIBILITY: private
+#+CENSOR_PROFILE: strict
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:d2f41000a3811707705ea350c81812fbc4740d42eda82a5567d9a803018f7c4f; repository target docs/wiki/configuration-cookbook.org; source links in body
+#+AI_GENERATED: t
+#+AI_TAG: ai_1346b6d5954b69eb
+#+FILETAGS: :ai:ai_1346b6d5954b69eb:agentprolog:prolog-runtime:documentation:configuration-cookbook:
+
+#+PROPERTY: header-args :eval never-export
+#+description: Fifteen runnable Prolog configurations, explicit authority and offline checks
+
+* What these recipes are
+
+The complete source files live in [[file:../../examples/configurations/][examples/configurations/]]. They are small compositions of the real loader, upstream provider descriptors, workspace tools and native prompt units. None creates another agent loop, provider transport or package manager.
+
+These examples are executable trusted Prolog, not sandboxed settings. Review their code and dependencies before loading them. Tool grants constrain runtime tool invocation; they do not constrain directives or arbitrary Prolog executed while loading a trusted file.
+
+All shell blocks below run from the AgentProlog repository root in a shell with SWI-Prolog and Node available. Set =PROLOG_RLM_SOURCE= to a checkout of the runtime revision pinned by this repository; the examples do not download one. The default flake application provides the interactive terminal UI. =--json= is not an application flag.
+
+* Choose a starting point
+
+| Need | Complete entrypoint | Load as | Important behavior |
+|------+---------------------+---------+--------------------|
+| Empty direct-mode baseline | =minimal.pl= | =--plugin= | No tools or capabilities |
+| OpenRouter provider only | =openrouter.pl= | =--plugin= | Credential stays =env('OPENROUTER_API_KEY')= |
+| Local compatible server | =local-compatible.pl= | =--plugin= | Loopback port 1234; model name from environment |
+| One read-only file tool | =read-only-project.pl= | =--plugin= | Registers only =workspace_read= |
+| Confined coding tools | =coding-workspace.pl= | =--plugin= | Read/create/write/modify plus fixed Node syntax check |
+| Builder/reviewer identities | =named-agents.pl= | =--plugin= | Reviewer selected by default; narrows builder authority |
+| Native evidence-review skill | =native-skills.pl= | =--plugin= | Inert upstream =prompt_unit= data |
+| Small budgets | =bounded-budget.pl= | =--plugin= | Explicit per-key bounds; optional =brief= agent |
+| Trusted instructions | =system-instructions.pl= | =--plugin= | Compiles instructions through upstream prompt compiler |
+| Canonical typed RLM planning | =typed-rlm.pl= | =--plugin= | Requires matching =model(openrouter)= grant |
+| Human artifact review | =artifact-hook.pl= | =--plugin= | Bounded nonempty text becomes an approval candidate |
+| Ready-made read-only composition | =operator-read-only.pl= | =--config= | Owns provider, plugin paths, grants and limits |
+| Coding plus skills and artifact review | =operator-coding.pl= | =--config= | Owns five file-tool grants and context inspection |
+| Existing ordinary local SWI pack | =operator-local-pack.pl= | =--config= | Consumes =examples/packs/coding= without downloading |
+| Explicit operator ceiling and narrowing | =operator-budget.pl= | =--config= | Raised operator ceilings, narrow plugin, narrower =brief= agent |
+
+Names in the table are relative to =examples/configurations/=. =support.pl= is a shared source-relative path/tool helper, not a configuration entrypoint. =skills/review-evidence.pl= is data, not a module to consult or pass to =--plugin=.
+
+* Establish the explicit project and tool root
+
+Do not point examples at an important checkout just to try them. Create a disposable, operator-controlled directory:
+
+#+begin_src sh
+export AGENTPROLOG_REPO="$PWD"
+export AGENTPROLOG_EXAMPLE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/agentprolog-example.XXXXXX")"
+export AGENTPROLOG_EXAMPLE_PROJECT="$AGENTPROLOG_EXAMPLE_ROOT/project"
+export AGENTPROLOG_EXAMPLE_STATE_ROOT="$AGENTPROLOG_EXAMPLE_ROOT/state"
+install -d -m 700 "$AGENTPROLOG_EXAMPLE_PROJECT" "$AGENTPROLOG_EXAMPLE_STATE_ROOT"
+export AGENTPROLOG_EXAMPLE_NODE="$(command -v node)"
+export PROLOG_RLM_SOURCE=/absolute/path/to/the/pinned/prolog-rlm
+printf 'An example file for review.\n' > "$AGENTPROLOG_EXAMPLE_PROJECT/note.txt"
+printf 'export const answer = 42;\n' > "$AGENTPROLOG_EXAMPLE_PROJECT/app.mjs"
+#+end_src
+
+=AGENTPROLOG_EXAMPLE_PROJECT= is deliberately required for filesystem-tool examples. It must name an existing absolute directory writable by the process. The shared workspace-tool constructor checks write access even when this example registers only its read tool. Read-only means the registered/granted tool surface, not an operating-system read-only mount.
+
+Pass exactly this same directory to the application's =--project=. The environment chooses the tool-handler root, whereas =--project= chooses the loader's project and project-local configuration discovery. The loader does not automatically prove these independently supplied roots equal. The commands here keep them identical.
+
+The workspace tools reject symlinks, traversal, absolute tool arguments and oversized files; they are not an OS sandbox against a hostile concurrent process replacing directories. Isolate the workspace appropriately.
+
+=AGENTPROLOG_EXAMPLE_NODE= is optional; when present it must be an absolute executable path. Otherwise the coding helper resolves =node= on the trusted process's =PATH=. It never accepts a model-supplied executable. The underlying tool runs a fixed argument vector, =Node --check ABSOLUTE_FILE=, with no shell and an empty child environment.
+
+The sample operator files explicitly set =trusted_project(false)=. If the selected project already contains =.agentprolog/config.pl=, loading fails; they do not ignore or silently execute that file. Use the empty disposable project above. To intentionally trust a real project configuration, review it and make a separate operator configuration with =trusted_project(true)=. Adding a contradictory =--trust-project= flag to these sample operators is not an override: duplicate singleton options fail.
+
+* First load without contacting any provider
+
+Construct and inspect a configuration without starting a model turn:
+
+#+begin_src sh
+swipl -q -p "library=$PROLOG_RLM_SOURCE/prolog" \
+  -s prolog/agentprolog_config.pl \
+  -g 'getenv('\''AGENTPROLOG_EXAMPLE_PROJECT'\'',P),load_configuration(P,[plugin('\''examples/configurations/minimal.pl'\''),allowed_capabilities([])],C),portray_clause(C),halt'
+#+end_src
+
+The output has =profile:minimal=, =mode:direct=, empty =tools= and =capabilities=, default budgets and canonical source paths. Configuration loading is not a connectivity check. No =OPENROUTER_API_KEY= is needed to construct provider descriptors either.
+
+To inspect a complete operator composition offline:
+
+#+begin_src sh
+swipl -q -p "library=$PROLOG_RLM_SOURCE/prolog" \
+  -s prolog/agentprolog_config.pl \
+  -g 'getenv('\''AGENTPROLOG_EXAMPLE_PROJECT'\'',P),load_configuration(P,[config_file('\''examples/configurations/operator-coding.pl'\'')],C),portray_clause(C),halt'
+#+end_src
+
+Relative filenames in these two invocations are deliberately shell/repository-root inputs. Inside the examples, bundled plugin/package paths are anchored to =support.pl='s source directory; skill paths are resolved by the loader relative to their defining plugin. Their interpretation does not change when the host's working directory changes. Keep this example directory and the referenced repository modules together if relocating them; copying a lone operator file elsewhere breaks its bundled dependencies.
+
+* 1. Minimal direct configuration
+
+[[file:../../examples/configurations/minimal.pl][Source: minimal.pl]]
+
+#+begin_src prolog
+:- module(agentprolog_example_minimal,[agentprolog_config/1]).
+agentprolog_config(_{profile:minimal,mode:direct,capabilities:[],tools:[]}).
+#+end_src
+
+This establishes an intentionally empty tool surface, not a fake offline provider. Starting an actual direct-mode model turn still uses the configured/default provider and may incur network traffic. To start the UI after arranging credentials separately:
+
+#+begin_src sh
+nix run . -- --project "$AGENTPROLOG_EXAMPLE_PROJECT" \
+  --state "$AGENTPROLOG_EXAMPLE_STATE_ROOT/minimal" \
+  --plugin "$AGENTPROLOG_REPO/examples/configurations/minimal.pl"
+#+end_src
+
+Use a fresh private state directory for each distinct composition. Reusing persisted session state with a changed configuration is rejected by the configuration binding.
+
+* 2. OpenRouter, credentials by reference
+
+[[file:../../examples/configurations/openrouter.pl][Source: openrouter.pl]] calls the upstream =openrouter_provider/2= constructor with the explicit model identifier ='openrouter/free'=. This is a sample routing choice, not a guarantee about current availability, quality, rate limits or zero billing.
+
+The resulting descriptor contains =credential(env('OPENROUTER_API_KEY'))=. It never reads the key into the configuration term. Set the variable using your normal secret-management mechanism before an actual model turn; do not paste credentials into source files or inspect them in logs.
+
+#+begin_src sh
+nix run . -- --project "$AGENTPROLOG_EXAMPLE_PROJECT" \
+  --state "$AGENTPROLOG_EXAMPLE_STATE_ROOT/openrouter" \
+  --plugin "$AGENTPROLOG_REPO/examples/configurations/openrouter.pl"
+#+end_src
+
+This adds provider options only. It neither registers tools nor grants capabilities. In =direct= mode it does not require the additional RLM =model(openrouter)= capability; that grant is required by the RLM recipe below.
+
+* 3. A local OpenAI-compatible endpoint
+
+[[file:../../examples/configurations/local-compatible.pl][Source: local-compatible.pl]] uses the existing upstream compatible-provider constructor. Start your compatible server separately, listening at =http://127.0.0.1:1234/v1/chat/completions=, then name a model actually loaded by that server:
+
+#+begin_src sh
+export AGENTPROLOG_EXAMPLE_LOCAL_MODEL='the-model-id-reported-by-your-server'
+nix run . -- --project "$AGENTPROLOG_EXAMPLE_PROJECT" \
+  --state "$AGENTPROLOG_EXAMPLE_STATE_ROOT/local" \
+  --plugin "$AGENTPROLOG_REPO/examples/configurations/local-compatible.pl"
+#+end_src
+
+The literal endpoint is intentional and easy to audit. There is no server startup, model download or automatic fallback to a hosted provider. The plugin requires a nonempty model environment variable even when only inspecting its configuration.
+
+The descriptor uses =credential(none)= for this loopback server. For an authenticated server, adapt the constructor's credential argument to =env('LOCAL_LLM_API_KEY')=, not a literal token. Local transport compatibility and reported usage must be validated against the particular server; loading this example proves neither.
+
+* 4. Read one confined project file
+
+[[file:../../examples/configurations/read-only-project.pl][Source: read-only-project.pl]] registers only =workspace_read=, although the shared upstream constructor can describe four workspace operations. The sample filters registrations to =effect:read= and requests only =tool(workspace_read)= plus =context(peek)=.
+
+#+begin_src sh
+nix run . -- --project "$AGENTPROLOG_EXAMPLE_PROJECT" \
+  --state "$AGENTPROLOG_EXAMPLE_STATE_ROOT/read" \
+  --plugin "$AGENTPROLOG_REPO/examples/configurations/read-only-project.pl" \
+  --plugin "$AGENTPROLOG_REPO/examples/configurations/openrouter.pl" \
+  --allow-tool workspace_read --allow-context peek
+#+end_src
+
+Ask it to summarize =note.txt=. Tool paths are relative to the configured tool root, so supply =note.txt=, not its absolute path. Tool results are opaque native context; =context(peek)= lets the model inspect the content instead of guessing from an alias. No create, write, modify or process tool is registered.
+
+Equivalent operator-file launch:
+
+#+begin_src sh
+nix run . -- --project "$AGENTPROLOG_EXAMPLE_PROJECT" \
+  --state "$AGENTPROLOG_EXAMPLE_STATE_ROOT/read-operator" \
+  --config "$AGENTPROLOG_REPO/examples/configurations/operator-read-only.pl"
+#+end_src
+
+[[file:../../examples/configurations/operator-read-only.pl][operator-read-only.pl]] exports =agentprolog_options/1= and supplies the absolute plugin paths, grants and =max_model_calls:3=, =max_tool_calls:6=, =max_cost_usd:0.05= limits. Do not add =--allow-tool= flags to this launch: they produce another =allowed_capabilities/1= option instead of extending the operator file's list.
+
+* 5. Coding tools with a fixed syntax checker
+
+[[file:../../examples/configurations/coding-workspace.pl][Source: coding-workspace.pl]] supplies:
+
+| Tool | Effect | Required arguments | Guarantee / limitation |
+|------+--------+--------------------+------------------------|
+| =workspace_read= | read | =path= | Bounded UTF-8 read, content hash |
+| =workspace_create= | write | =path, content= | New file only; never overwrite |
+| =workspace_write= | write | =path, content, expected_sha256= | Reject stale content |
+| =workspace_modify= | write | =path, old_text, new_text, expected_sha256= | Exactly one occurrence; reject stale content |
+| =workspace_check= | process | =path= | Node syntax check; does not execute program or test behavior |
+
+All filesystem tools use the explicit environment root. File contents are limited to 65,536 UTF-8 bytes. There is no arbitrary shell, arbitrary process executable, recursive directory listing or generic test runner in this composition.
+
+#+begin_src sh
+nix run . -- --project "$AGENTPROLOG_EXAMPLE_PROJECT" \
+  --state "$AGENTPROLOG_EXAMPLE_STATE_ROOT/coding-tools" \
+  --plugin "$AGENTPROLOG_REPO/examples/configurations/coding-workspace.pl" \
+  --plugin "$AGENTPROLOG_REPO/examples/configurations/openrouter.pl" \
+  --allow-tool workspace_read --allow-tool workspace_create \
+  --allow-tool workspace_write --allow-tool workspace_modify \
+  --allow-tool workspace_check --allow-context peek
+#+end_src
+
+Capabilities are necessary but do not replace native write/process approval policy. Inspect exact targets and expected hashes before approving. The checker returns =exit_code= and =output=; a completed invocation is not equivalent to =exit_code:0=, and syntax success is not behavior-test success.
+
+Do not combine =read-only-project.pl= and =coding-workspace.pl= in one composition: both register =workspace_read= and duplicate tool names fail. Choose one tool plugin, then add independent provider/instruction/skill/policy plugins.
+
+* 6. Named builder and reviewer agents
+
+[[file:../../examples/configurations/named-agents.pl][Source: named-agents.pl]] includes its own coding tool registrations. Do not also load =coding-workspace.pl=. Its parent configuration requests the coding capability set; the selected reviewer narrows it to =workspace_read= and =context(peek)=.
+
+#+begin_src sh
+nix run . -- --project "$AGENTPROLOG_EXAMPLE_PROJECT" \
+  --state "$AGENTPROLOG_EXAMPLE_STATE_ROOT/reviewer" \
+  --plugin "$AGENTPROLOG_REPO/examples/configurations/named-agents.pl" \
+  --plugin "$AGENTPROLOG_REPO/examples/configurations/openrouter.pl" \
+  --allow-tool workspace_read --allow-tool workspace_create \
+  --allow-tool workspace_write --allow-tool workspace_modify \
+  --allow-tool workspace_check --allow-context peek
+#+end_src
+
+The default is =reviewer= with two model calls and four tool calls. To select =builder=, use the same flags with =--agent builder= and a different =--state= directory; its budget is six model calls and twelve tool calls.
+
+Parent capabilities must still be operator-granted even when the selected agent later narrows them. A named agent cannot expand the parent budget or capability set. Registered tools may remain present in the inherited registry, but ungranted tools cannot execute. If even registering mutation tools is undesirable, use the separate read-only plugin/operator instead of this shared team composition.
+
+* 7. Native skill data, no new authority
+
+[[file:../../examples/configurations/native-skills.pl][Source: native-skills.pl]] names =skills/review-evidence.pl= relative to itself. The data file contains exactly one term:
+
+#+begin_src prolog
+agentprolog_skills([
+    prompt_unit{
+        unit:skill('review-evidence'),
+        description:"Review engineering claims against concrete evidence.",
+        content:"For each completion claim, identify the actual command, exit status and observed output. Distinguish syntax checks from behavior tests. If evidence is missing, say so.",
+        triggers:[trigger(keyword("review"),100)],
+        priority:100
+    }
+]).
+#+end_src
+
+This shortened display explains the representation; the complete source includes the remaining evidence and authority instructions and provenance. It is read as inert data, never consulted. It grants no capabilities and cannot pin itself as mandatory always-active policy. The plugin selects ='review-evidence'= through =selected_skills=; upstream compiler policy still controls admission and context limits.
+
+#+begin_src sh
+nix run . -- --project "$AGENTPROLOG_EXAMPLE_PROJECT" \
+  --state "$AGENTPROLOG_EXAMPLE_STATE_ROOT/skills" \
+  --plugin "$AGENTPROLOG_REPO/examples/configurations/openrouter.pl" \
+  --plugin "$AGENTPROLOG_REPO/examples/configurations/native-skills.pl"
+#+end_src
+
+No Markdown instruction file is consulted at runtime by this recipe. Existing Markdown skill packages can be imported through =nix run .#import-skill -- INPUT OUTPUT= using the upstream importer; the resulting native file is the configuration input.
+
+* 8. Bounded work and narrower named-agent budgets
+
+[[file:../../examples/configurations/bounded-budget.pl][Source: bounded-budget.pl]] sets all eleven currently supported budget keys:
+
+| Budget key | Requested value |
+|------------+-----------------|
+| =max_model_calls= | 3 |
+| =max_tool_calls= | 4 |
+| =max_iterations= | 6 |
+| =max_total_tokens= | 8192 |
+| =max_output_bytes= | 32768 |
+| =max_recursion_depth= | 0 |
+| =max_concurrent_subcalls= | 1 |
+| =max_context_ops= | 4 |
+| =max_native_calls_per_batch= | 2 |
+| =time_limit= | 30.0 |
+| =max_cost_usd= | 0.05 |
+
+#+begin_src sh
+nix run . -- --project "$AGENTPROLOG_EXAMPLE_PROJECT" \
+  --state "$AGENTPROLOG_EXAMPLE_STATE_ROOT/bounded" \
+  --plugin "$AGENTPROLOG_REPO/examples/configurations/openrouter.pl" \
+  --plugin "$AGENTPROLOG_REPO/examples/configurations/bounded-budget.pl"
+#+end_src
+
+Select the same plugin's =brief= agent for one model call, zero tool calls and two iterations:
+
+#+begin_src sh
+nix run . -- --project "$AGENTPROLOG_EXAMPLE_PROJECT" \
+  --state "$AGENTPROLOG_EXAMPLE_STATE_ROOT/brief" \
+  --plugin "$AGENTPROLOG_REPO/examples/configurations/openrouter.pl" \
+  --plugin "$AGENTPROLOG_REPO/examples/configurations/bounded-budget.pl" \
+  --agent brief
+#+end_src
+
+Recursion depth zero is suitable for this direct-mode recipe, not a promise that recursive RLM operations will work. Cost limits depend on upstream provider usage/accounting and are not a billing guarantee.
+
+The distinct [[file:../../examples/configurations/operator-budget.pl][operator-budget.pl]] demonstrates operator-owned =budget_ceiling= versus =budget_limits= and plugin/agent requests:
+
+#+begin_src sh
+nix run . -- --project "$AGENTPROLOG_EXAMPLE_PROJECT" \
+  --state "$AGENTPROLOG_EXAMPLE_STATE_ROOT/operator-budget" \
+  --config "$AGENTPROLOG_REPO/examples/configurations/operator-budget.pl"
+#+end_src
+
+The operator raises the maximum model-call ceiling to 16 and token ceiling to 65,536, while limiting cost to 0.05. The loaded plugin still requests only three calls and 8192 tokens; the selected =brief= agent narrows calls to one. Raising a ceiling does not raise an explicit lower request. This operator intentionally does not select a provider plugin and uses the normal default provider for actual turns.
+
+| Layer | What it may do | What it cannot do |
+|-------+----------------+-------------------|
+| Operator =budget_ceiling= | Explicitly replace default ceilings | Bypass value validation |
+| Operator =budget_limits= | Narrow that ceiling | Exceed that ceiling |
+| Plugin/project =budget= | Set values within the fixed operator ceiling | Exceed the ceiling |
+| Selected named agent =budget= | Narrow its merged parent budget | Expand the parent budget |
+
+Plugin/project layers are not strictly monotone: a later plugin may increase an earlier lower value if it still fits the fixed operator ceiling. Named-agent selection instead uses the already-merged parent budget as its ceiling.
+
+* 9. Trusted system instructions
+
+[[file:../../examples/configurations/system-instructions.pl][Source: system-instructions.pl]] supplies =runtime_options:[system_prompt("...")]=. It requests no tools or capabilities, so it can be composed with either provider or tool profile:
+
+#+begin_src sh
+nix run . -- --project "$AGENTPROLOG_EXAMPLE_PROJECT" \
+  --state "$AGENTPROLOG_EXAMPLE_STATE_ROOT/instructions" \
+  --config "$AGENTPROLOG_REPO/examples/configurations/operator-read-only.pl" \
+  --plugin "$AGENTPROLOG_REPO/examples/configurations/system-instructions.pl"
+#+end_src
+
+Adding =--plugin= is allowed because plugin options are repeatable. Adding a second =--config=, conflicting =--agent= or another grant list is not a generic override mechanism. Trusted system instructions are compiled using the existing upstream prompt compiler; they do not grant authority. Turns with configured system/skill projection currently use a non-streaming host callback.
+
+* 10. Typed RLM planning through the canonical runtime
+
+[[file:../../examples/configurations/typed-rlm.pl][Source: typed-rlm.pl]] selects =mode:rlm= rather than implementing its own planner. It uses OpenRouter, a 512-token planner-output limit, at most four model calls, recursion depth one and one concurrent subcall.
+
+#+begin_src sh
+nix run . -- --project "$AGENTPROLOG_EXAMPLE_PROJECT" \
+  --state "$AGENTPROLOG_EXAMPLE_STATE_ROOT/rlm" \
+  --plugin "$AGENTPROLOG_REPO/examples/configurations/typed-rlm.pl" \
+  --allow-model openrouter --allow-context peek --allow-context search
+#+end_src
+
+All three requested capabilities must be granted. =provider_name(openrouter)= and =model(openrouter)= must agree. This is canonical typed planning and completion, not an instruction to execute arbitrary model-generated Prolog. There are no workspace tools in this standalone recipe. Availability and successful live planning require a working provider and are not established by the offline example tests.
+
+If adapting this to the local provider, change both provider descriptor/name and the requested/operator-granted model capability to =openai_compatible=. Merely appending =local-compatible.pl= leaves the earlier RLM capability request unchanged and is not a complete migration.
+
+* 11. Artifact policy distinct from tool approval
+
+[[file:../../examples/configurations/artifact-hook.pl][Source: artifact-hook.pl]] exports a trusted =review_artifact/2= hook and installs it as =validate_artifact=. Its contract is:
+
+#+begin_src prolog
+call(Hook, CanonicalResult, Decision).
+% CanonicalResult.value is the final text.
+% This example accepts 1..8192 string characters and returns:
+% approval(_{kind:"draft",text:Text,
+%            policy:"operator_review_required",published:false}).
+#+end_src
+
+#+begin_src sh
+nix run . -- --project "$AGENTPROLOG_EXAMPLE_PROJECT" \
+  --state "$AGENTPROLOG_EXAMPLE_STATE_ROOT/artifact" \
+  --plugin "$AGENTPROLOG_REPO/examples/configurations/openrouter.pl" \
+  --plugin "$AGENTPROLOG_REPO/examples/configurations/artifact-hook.pl"
+#+end_src
+
+Empty, non-string or oversized values fail the hook; they are not silently approved. This is structural validation and a human review gate, not verification of code behavior or factual claims. Artifact approval is a separate stage from native tool mutation/process approval. Neither means publication, installation or deployment; artifact traces remain =published:false=.
+
+* 12. Complete coding operator with skills and artifact review
+
+[[file:../../examples/configurations/operator-coding.pl][Source: operator-coding.pl]] composes the coding tools, OpenRouter, evidence skill and artifact hook. It explicitly grants all five tools and =context(peek)=, then narrows limits to six model calls, twelve tool calls and cost 0.10.
+
+#+begin_src sh
+nix run . -- --project "$AGENTPROLOG_EXAMPLE_PROJECT" \
+  --state "$AGENTPROLOG_EXAMPLE_STATE_ROOT/coding-operator" \
+  --config "$AGENTPROLOG_REPO/examples/configurations/operator-coding.pl"
+#+end_src
+
+No additional grants are needed. Exact schema names and grants are in the source. Because later plugins override =profile=, the final profile is =artifact_review=; this display identity does not change the tool/capability behavior. Do not infer security authority from a profile label.
+
+* 13. Consume an ordinary local SWI-Prolog pack
+
+[[file:../../examples/configurations/operator-local-pack.pl][Source: operator-local-pack.pl]] supplies =package(PackRoot)= pointing at the existing [[file:../../examples/packs/coding/][examples/packs/coding/]] pack. It adds coding tools and OpenRouter and selects the pack's =builder= agent:
+
+#+begin_src sh
+nix run . -- --project "$AGENTPROLOG_EXAMPLE_PROJECT" \
+  --state "$AGENTPROLOG_EXAMPLE_STATE_ROOT/pack" \
+  --config "$AGENTPROLOG_REPO/examples/configurations/operator-local-pack.pl"
+#+end_src
+
+The pack has ordinary =pack.pl= metadata and a =prolog/agentprolog_plugin.pl= entrypoint exporting =agentprolog_config/1=. The loader attaches its local library path, loads that trusted entrypoint and records its manifest in =sources=. This does not invoke =pack_install/1=, fetch dependencies or download anything.
+
+The pack contributes its existing ='build-todo'= native skill and builder/reviewer definitions. The operator supplies actual tools and grants separately. The selected builder's default instructions concern todo implementation, so use that recipe for the corresponding task, not as a neutral read-only assistant. This recipe does not install the artifact-review hook; add it as a separate trusted plugin if that policy is wanted.
+
+* Composing files without accidental authority changes
+
+| Combining choice | Result |
+|------------------+--------|
+| Provider + one workspace plugin | Independent options and tool surface compose |
+| Add instructions or skill plugin | Adds prompt context, not grants |
+| Add artifact hook | Adds final review policy, not publication |
+| Two workspace plugins registering the same name | Rejected: duplicate tool name |
+| Add another =capabilities= field | Replaces the earlier request list, not union |
+| Omit =capabilities= in a later plugin | Preserves the earlier request list |
+| Repeat a runtime option key across plugins | Later plugin's option wins |
+| Repeat a singleton operator option across file and CLI | Rejected: duplicate option |
+| Add a trusted project configuration | Applied after explicit plugin/package entries, before named-agent selection |
+| Copy module contents under the same module name to another path in one process | Rejected: module/source conflict |
+
+Fresh sidecar process per project/composition is the supported operational model. The example module names are unique across files, not safe templates to duplicate unchanged into multiple concurrently loaded paths.
+
+* Run the deterministic example checks
+
+The suite requires the pinned runtime libraries, SWI-Prolog and Node. It creates disposable project directories, uses explicit grants, restores example environment variables and unloads newly loaded entrypoint modules. Shared support dependencies stay loaded. No provider/model call is made and no API key is required.
+
+#+begin_src sh
+swipl -q -p "library=$PROLOG_RLM_SOURCE/prolog" \
+  -s test/documented_configs_test.pl \
+  -g 'run_tests(documented_configs),halt'
+#+end_src
+
+The suite loads every table entry through =load_configuration/3=, checks denial without grants, source-relative resolution under a changed working directory, explicit tool roots, operator distrust of discovered project code, native skill/instruction projection, provider credential references, budget rejection, agent narrowing, bounded artifact review and local-pack consumption. A Node syntax-check test uses JavaScript that would throw if executed; =--check= succeeds without running it.
+
+These checks do not establish live provider availability, billing correctness, arbitrary-plugin safety or application-level behavior. Run the repository's wider deterministic gate separately; a bounded, authorized live-model acceptance run is a separate kind of evidence.

@@ -1,0 +1,149 @@
+:PROPERTIES:
+:ID: 8e4e5526-9e8f-4bf0-a537-f06aee2578bf
+:END:
+#+TITLE: Installing AgentProlog
+#+CREATED: [2026-11-12 Thu 22:08]
+#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: documentation
+#+ROAM_VISIBILITY: private
+#+CENSOR_PROFILE: strict
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:9b4ce3a2954c01841cf7fa4b30aec245f704396f63407ca2fb133450704f4332; repository target docs/wiki/installation.org; source links in body
+#+AI_GENERATED: t
+#+AI_TAG: ai_8529367a8e05a665
+#+FILETAGS: :ai:ai_8529367a8e05a665:agentprolog:prolog-runtime:documentation:installation:
+
+#+PROPERTY: header-args :eval never-export
+
+* What this guide installs
+
+AgentProlog is a terminal conversation application and a durable Prolog session host. The host delegates model calls, tools, authority and budgets to the pinned Prolog-RLM dependency. It is not a browser IDE, and installing it does not configure a paid model account or grant filesystem tools.
+
+This wiki describes the implementation in the documentation checkout based on =0512eb8=. The Prolog operator configuration, named agents, native skills, coding package and todo acceptance workflow described here must not be assumed to exist on an older or unmerged =main=. Use the checkout containing these files. If your =flake.nix= or =--help= output differs, follow the implementation you actually have rather than copying flags from a newer wiki.
+
+* Prerequisites
+
+- Nix with the =nix-command= and =flakes= experimental features enabled.
+- An existing AgentProlog source checkout containing [[file:../../flake.nix][flake.nix]] and [[file:../../flake.lock][flake.lock]].
+- A terminal and permission to create a private session-state directory.
+- Network access for the initial Nix dependency fetch, unless the necessary inputs and builds are already cached.
+
+The packaged application supplies its own Node.js 22 and pinned Prolog runtime. A separately installed SWI-Prolog is not necessary merely to launch that package. Source development and the independent todo checker have additional requirements below.
+
+Do not put provider keys into a Nix expression or a Nix store path. Provider access is a separate, explicitly authorized setup step; the installation smoke test below needs no credentials.
+
+* Run from this checkout
+
+In a terminal, change to the AgentProlog checkout and request help:
+
+#+begin_src sh
+cd /absolute/path/to/agentProlog
+nix run .#agentProlog -- --help
+#+end_src
+
+The heading should include =AgentProlog canonical conversation UI=. The default app is the same application:
+
+#+begin_src sh
+nix run . -- --help
+#+end_src
+
+The =--= separates Nix arguments from application arguments. These commands display help and exit; they do not start a model turn.
+
+To build without opening a session:
+
+#+begin_src sh
+nix build .#agentProlog
+./result/bin/agentProlog --help
+#+end_src
+
+To install this checkout into your Nix profile, optionally use:
+
+#+begin_src sh
+nix profile install .#agentProlog
+agentProlog --help
+#+end_src
+
+The executable name is case-sensitive: =agentProlog=. A profile installation refers to the selected source/build; it does not automatically track changes in this checkout. For reproducible troubleshooting, prefer =nix run .#agentProlog= from the intended source directory.
+
+* First launch without provider access
+
+Choose a project directory that already exists and a private state directory outside it. For example:
+
+#+begin_src sh
+mkdir -p "$HOME/agentprolog-first-project"
+install -d -m 700 "$HOME/.local/state/agentprolog-first-session"
+nix run .#agentProlog -- \
+  --project "$HOME/agentprolog-first-project" \
+  --state "$HOME/.local/state/agentprolog-first-session"
+#+end_src
+
+At the =agentprolog>= prompt, enter:
+
+#+begin_example
+/profile
+/inspect
+/quit
+#+end_example
+
+These inspect the connection/session and close the application. Do not submit a natural-language objective until you have intentionally configured provider access and a budget. With no plugins or project configuration, the generic configuration has no registered tools and no capability grants; opening a session is not permission to edit the project.
+
+If =.agentprolog/config.pl= already exists in the selected project, startup refuses to load it without explicit project trust. Read it and its imports first. Do not add =--trust-project= just to silence a warning about unfamiliar code.
+
+* Choosing session storage
+
+=--project DIR= is the workspace, not the conversation database. =--state DIR= holds private session checkpoints, the native effect store and the process ownership lock. Keep it outside the source tree and out of public backups or commits: tools and conversations can contain sensitive project content even when credential values are not deliberately logged.
+
+Without =--state=, the CLI hashes the canonical project path and chooses a stable directory under =$XDG_STATE_HOME/agentprolog/=, or =~/.local/state/agentprolog/= when =XDG_STATE_HOME= is unset.
+
+- Use a distinct state directory for each project and configuration.
+- Do not open two active owners of the same state directory.
+- Restart the host after changing trusted configuration. Existing state is bound to the effective configuration and source hashes; changed code may require a new state directory rather than reconnecting to incompatible state.
+- Reconnection restores recorded session state; it does not silently approve or replay uncertain writes.
+
+See [[file:sessions-and-recovery.org][Sessions and recovery]] for interruption and configuration-mismatch handling.
+
+* Available Nix outputs
+
+The output definitions in [[file:../../flake.nix][flake.nix]] are authoritative.
+
+| Output | Purpose |
+|--------+---------|
+| =nix run .= or =nix run .#agentProlog= | Interactive terminal application and bundled generic host |
+| =nix run .#conversation= | Alias for the same terminal application |
+| =nix build .#session-host= | =agentprolog-session=, the lower-level protocol host |
+| =nix run .#import-skill -- INPUT OUTPUT= | Import a Markdown skill into inert native Prolog skill data |
+| =nix run .#zara-runtime -- --help= | Optional upstream Zara sidecar with the =agentprolog= profile |
+| =nix develop= | Development shell with pinned upstream runtime, Node.js and skill importer |
+
+The raw session host is not an interactive shell. It expects the canonical JSON-line protocol; most users should launch the default app. Likewise, the Zara runtime profile is optional, not a prerequisite for terminal use.
+
+* Development and local checks
+
+Enter the checkout's development environment:
+
+#+begin_src sh
+nix develop
+nix flake check
+#+end_src
+
+The flake checks include installed CLI help, native configuration/agent/skill/tool/session tests, skill import, runtime loading and the optional Zara profile descriptor. They do not make paid provider calls or prove that a generated application works in a browser.
+
+For the broader source gate, use an existing local Prolog-RLM checkout matching the input commit in =flake.nix=:
+
+#+begin_src sh
+bash scripts/check.sh /absolute/path/to/pinned/prolog-rlm
+#+end_src
+
+This script requires =swipl=, =node= and =python3= on =PATH=. It checks the runtime checkout's HEAD against the flake pin, validates Org links/provenance and the tutorial's configuration modules, runs seven native suites (including the documented configuration cookbook), JavaScript unit suites and generic/native integration tests, then checks whitespace. An arbitrary newer Prolog-RLM checkout is not a substitute for the pinned input. These commands do not contact a model provider.
+
+For the todo HTTP checker, the Node executable must accept the stable =--permission= flag and the filesystem permission options used by [[file:../../packages/conversation-ui/test/todo-app-proof.js][todo-app-proof.js]]. A generic statement that Node is installed is insufficient if an older Node minor rejects that flag. See [[file:development-and-testing.org][Development and testing]].
+
+* Common installation problems
+
+- *Nix says flakes are disabled:* enable =nix-command= and =flakes= in your Nix configuration, or pass =--extra-experimental-features 'nix-command flakes'= to Nix.
+- *Dependency fetch fails:* check access to the actual pinned input in =flake.nix=/=flake.lock=. Do not silently replace it with an unrelated runtime revision.
+- *=agentProlog= is not found:* use =nix run .#agentProlog= or the =./result/bin/agentProlog= from a successful build; =nix develop= alone is a development environment, not a profile installation.
+- *Running =node packages/conversation-ui/src/cli.js= asks for a host launcher:* the Nix application sets =AGENTPROLOG_SESSION=. Raw Node startup does not manufacture that bundled host. Use the packaged app, or deliberately provide a development launcher as described in [[file:scripting.org][Scripting]].
+- *Unknown option:* compare with =--help=. The CLI has no =--json= or =--headless= flag. Use the supported client/protocol APIs for automation.
+
+Continue with [[file:getting-started.org][Getting started]], then [[file:tutorial-todo-app.org][the todo-app tutorial]]. Return to [[file:Home.org][the wiki home]].

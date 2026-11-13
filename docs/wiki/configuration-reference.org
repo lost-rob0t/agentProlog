@@ -1,0 +1,225 @@
+:PROPERTIES:
+:ID: 984c8835-7516-4a58-82b7-f92c3afd0646
+:END:
+#+TITLE: Configuration reference
+#+CREATED: [2026-11-12 Thu 22:08]
+#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: documentation
+#+ROAM_VISIBILITY: private
+#+CENSOR_PROFILE: strict
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:59d412637492f2c5ca6f7a6142b5c3e681ee7bce06680a0139d8f7ca05e5d264; repository target docs/wiki/configuration-reference.org; source links in body
+#+AI_GENERATED: t
+#+AI_TAG: ai_472941b5f075e5f1
+#+FILETAGS: :ai:ai_472941b5f075e5f1:agentprolog:prolog-runtime:documentation:configuration-reference:
+
+#+PROPERTY: header-args :eval never-export
+
+* Configuration has two trust levels
+
+AgentProlog loads executable Prolog configuration, not a sandboxed settings language. Only an operator may authorize a configuration file, plugin, local package or project file. Capability checks constrain native runtime operations; they do not constrain arbitrary Prolog directives or predicates in trusted code.
+
+| Entry point | Role | How loaded |
+|-------------+------+------------|
+| =agentprolog_options/1= | Operator policy: trusted sources, grants, ceilings and agent selection | =--config FILE= |
+| =agentprolog_config/1= | Product/plugin/project settings within operator policy | =--plugin FILE=, =--package DIR=, or trusted =.agentprolog/config.pl= |
+| =agentprolog_skills/1= data term | Inert prompt units, not executable configuration | =skill_files= in a product layer |
+
+Both executable entry points must be exported by the module declaration in the file's first term. Each predicate must yield exactly one result within five seconds: a list for operator options, a dict for product settings. The five-second bound surrounds predicate evaluation, not consultation or arbitrary loading directives. Use unique module names across files and a fresh host process when changing trusted code.
+
+Project and state directories are launch arguments, not product configuration keys. There is no model/wire command to load executable configuration or widen grants.
+
+* Operator options: complete list
+
+=load_configuration(Project, Options, Config)= accepts the following options. =config_file/1= is expanded before ordinary option validation.
+
+| Option | Accepted shape and effect | CLI equivalent |
+|--------+---------------------------+----------------|
+| =config_file(Path)= | One atom path to an operator module; nested =config_file/1= in its returned list is unsupported | =--config FILE= |
+| =plugin(Path)= | Atom path to explicitly trusted executable product configuration; repeatable | =--plugin FILE= |
+| =package(Root)= | Atom path to a local readable SWI pack; repeatable | =--package DIR= |
+| =agent(Name)= | Atom; selects one named layer, or =none= to skip named selection | =--agent NAME= |
+| =trusted_project(Bool)= | =true= or =false=; default =false= | =--trust-project= supplies =true= |
+| =allowed_capabilities(List)= | Native capability list; default =[]=; duplicates and invalid shapes rejected | Repeated =--allow-tool NAME=, =--allow-context OP= and =--allow-model NAME= build one list |
+| =budget_ceiling(Dict)= | Operator-only replacement of individual default budget ceilings; may raise or lower defaults | Operator file/API only |
+| =budget_limits(Dict)= | Narrows individual operator ceilings and establishes the starting effective budget | Operator file/API only |
+
+No other operator options are accepted. Except =plugin/1= and =package/1=, each option name may occur only once. Options returned by the operator file are prepended to explicit launch/API options; singleton collisions fail with =duplicate_option=, even if values match. CLI options do not silently override operator settings. An empty operator-file list is valid.
+
+For example, do not combine operator-file =allowed_capabilities/1= with any =--allow-*= flags: the latter create another =allowed_capabilities/1= option. Keep that policy in one place.
+
+#+begin_src prolog
+:- module(my_operator_policy, [agentprolog_options/1]).
+
+agentprolog_options([
+    plugin('/approved/agentprolog/product.pl'),
+    trusted_project(true),
+    allowed_capabilities([context(peek)]),
+    budget_ceiling(_{max_model_calls:12}),
+    budget_limits(_{max_cost_usd:0.05}),
+    agent(reviewer)
+]).
+#+end_src
+
+The referenced product must define =reviewer= and request any capabilities it actually needs. Grants are ceilings, not automatic requests.
+
+* Launch-only options and environment
+
+These conversation-UI options are not entries in either Prolog configuration predicate:
+
+| CLI option | Meaning |
+|------------+---------|
+| =--project DIR= | Project directory; defaults to the UI working directory |
+| =--state DIR= | Explicit session-state directory; defaults to the project-keyed state location described below |
+| =--sidecar EXECUTABLE= | Use an explicitly configured external adapter instead of the bundled host |
+| =--sidecar-arg ARG= | Append one argument to that adapter; repeatable |
+| =--help= | Print help and exit without starting a host |
+
+=AGENTPROLOG_SESSION= locates the bundled generic-host launcher when running the UI directly; the packaged Nix application supplies it. =AGENTPROLOG_SIDECAR= selects an external adapter unless overridden with =--sidecar=. External adapters cannot be combined with bundled-host configuration/grant flags, an explicit state directory or a changed project path; pass adapter-specific arguments with =--sidecar-arg=. Do not assume an external adapter implements this generic loader's settings.
+
+The generic host's own positional interface is =agentprolog-session STATE_DIRECTORY PROJECT [host flags...]=. It understands the config/plugin/package/agent/trust/grant flags in the operator table, not the UI's project/state/sidecar options. There are no bundled CLI flags for arbitrary runtime options, dollar ceilings, shell execution or tool installation.
+
+* Product/project keys: complete list
+
+Any subset of the following keys may appear in the dict returned by =agentprolog_config/1=. The dict tag is not a setting. Unknown keys fail.
+
+| Key | Shape/default | Merge behavior |
+|-----+---------------+----------------|
+| =profile= | Nonempty atom or string; =generic= | Last supplied value replaces earlier value; descriptive UI identity, not a permission bundle |
+| =mode= | =direct= or =rlm=; =direct= | Last supplied value selects the canonical runtime entry point |
+| =tools= | List of =tool(Schema, Handler)=; =[]= | Append; duplicate schema names anywhere in the resulting list fail |
+| =capabilities= | Valid native capability list; =[]= | Replace the entire earlier list when present; omission inherits; =[]= clears it |
+| =runtime_options= | List of whitelisted ground unary terms; =[]= | Override by option name, preserving other names |
+| =budget= | Dict of known budget keys | Replace supplied keys within the operator ceiling; omission inherits |
+| =hooks= | Dict; =_{}= | Merge by hook name; later hook replaces earlier hook of the same name |
+| =agents= | Dict mapping atom names to agent-layer dicts; =_{}= | Add names; duplicate names fail rather than merge |
+| =default_agent= | Atom; =none= | Last supplied value; used unless operator =agent/1= is supplied |
+| =skill_files= | List of atom paths; =[]= | Append; paths resolved relative to each declaring source file |
+| =selected_skills= | List of atom skill names; =[]= | Replace the entire earlier list when present; omission inherits |
+
+=project=, =sources= and =agent= are loader-produced output fields, not accepted input keys. A top-level =model=, =provider=, =instructions=, =extends=, =shell= or arbitrary runtime key is not supported. Model selection belongs inside the configured provider term; instructions use =runtime_options:[system_prompt("...")]=.
+
+Choose =direct= for the documented resumable interactive mutation approvals.
+The host invokes typed completion for =mode:rlm=, but typed-plan pending tool
+approvals are not integrated into its direct-mode suspended-cursor UI bridge.
+
+#+begin_src prolog
+:- module(my_product_settings, [agentprolog_config/1]).
+
+agentprolog_config(_{
+    profile:review,
+    mode:direct,
+    capabilities:[context(peek)],
+    runtime_options:[system_prompt("Review supplied evidence; distinguish facts from assumptions.")],
+    budget:_{max_model_calls:3, max_tool_calls:0, time_limit:30.0}
+}).
+#+end_src
+
+* Exact loading and precedence
+
+1. Evaluate the optional operator file and validate the combined operator option list.
+2. Resolve the readable project directory; prepare explicitly named local packages. Package library attachment happens before configuration layers are consulted.
+3. Build the source list from =plugin/1= and =package/1= options, preserving their order in the combined options. Each package contributes =prolog/agentprolog_plugin.pl=.
+4. If =Project/.agentprolog/config.pl= exists, require =trusted_project(true)= and append it last. Without trust, fail; do not silently ignore it.
+5. Reject duplicate resolved configuration sources. Establish defaults, operator ceilings and operator limits.
+6. Load each source in order, merging its product layer. Every intermediate layer must satisfy grants, tool references and budget limits; a later layer cannot repair an earlier invalid layer.
+7. Select and merge one named agent against the completed parent configuration.
+8. Validate the resulting skill files as inert native data. Return the resolved project and source inventory.
+
+Later product layers can replace profile, mode, selected skills, capabilities, runtime-option names, budget keys and hooks. They cannot remove earlier tool registrations or skill-file entries, or redefine an earlier agent name. An empty =tools=, =runtime_options=, =hooks=, =agents= or =skill_files= value therefore does not clear inherited entries. Empty =capabilities= and =selected_skills= do clear their inherited lists. A later =system_prompt= replaces the earlier instruction string rather than concatenating it.
+
+Product budget changes are bounded by the effective operator ceiling, not by the preceding product layer. For example, with an operator ceiling of eight calls, a plugin can request three and the following project layer can request six. Only the selected named agent is strictly bounded by its final parent's budget. See [[file:providers-and-budgets.org][Providers and budgets]].
+
+* Runtime options: closed whitelist
+
+Each item must be a ground compound with exactly one argument. Duplicate names within a single layer fail, even though the same name in a later layer legitimately overrides an earlier value.
+
+| Option | Meaning and value contract |
+|--------+----------------------------|
+| =provider(Provider)= | Native provider descriptor, normally built with =library(rlm_chain)=; carries endpoint, model and credential references |
+| =provider_name(Name)= | Native provider identity; keep consistent with the descriptor and any =model(Name)= capability |
+| =model_handler(Module:Closure)= | Trusted callback =call(Closure, Request, Outcome)= for direct/nested model I/O; deterministic fixtures use this |
+| =planner_handler(Module:Closure)= | Trusted root-planner callback with the same request/outcome contract for =mode:rlm= |
+| =prompt_compile_mode(Mode)= | Upstream tool-schema projection: =compiled= by default, or =all_tools=; not the execution =mode= |
+| =system_prompt(Text)= | Trusted instruction string compiled into projected provider context |
+| =agent_name(Name)= | Runtime identity text; a selected named agent forcibly sets this to its configured atom name |
+| =planner_max_tokens(N)= | Positive integer native planner/model request token limit; upstream default 1024 |
+
+The loader checks option shape, groundness and the whitelist. For the two handler options it additionally requires a ground module-qualified callable. Most other value semantics are validated when the native runtime/compiler/provider consumes them. Successful configuration loading is not proof of a valid endpoint, available model, implemented callback or successful provider request.
+
+=temperature/1=, =max_tokens/1=, =child_capabilities/1=, =skill_roots/1=, =tool_registry/1=, =capabilities/1=, =budget/1=, =tools/1=, =text_delta_handler/1= and arbitrary upstream options are not accepted in product =runtime_options=. The host supplies registry, capabilities, budget, cancellation and UI controls itself. A trusted integration using lower-level APIs has a different contract; do not present those APIs as configuration keys.
+
+* Capabilities and tool registration
+
+The operator list is an exact ceiling. Each layer's effective capabilities must be members of that list, with no duplicates. Every =tool(Name)= request must have a matching registered tool by that merge step. Registering a tool does not grant it, and granting a ceiling does not cause a product to request it. Capabilities can be re-added by a later product layer if still operator-granted; selected agents may only take a subset of the final parent list.
+
+Native validation accepts atom capabilities =rlm=, =parallel=, =retry= and =checkpoint=, plus unary capabilities with a nonempty atom name: =tool=, =context=, =spec=, =plan=, =model=, =graph=, =persistence=, =network=, =filesystem=, =process= and =mcp=. Acceptance of a shape does not install an implementation or expose an associated product command. The bundled CLI has only tool/context/model grant flags; other native shapes require operator-file/API policy and an actually supported runtime path.
+
+Tools are =tool(Schema, Module:Closure)= or =tool(Schema, tool_handler(Module:Preflight, Module:Execute))=. All closures must be ground and module-qualified. The loader validates schemas by registering each tool in a temporary canonical registry; handlers are not executed for this validation. Native schema constraints, effects, approvals and invocation bounds still apply. The preflight binding supports exact target/confinement validation before authority mediation.
+
+There is no built-in arbitrary shell command or tool installer. Trusted code can define a specific tool, but that is executable integration work subject to its own schema, grants, effects and review. See [[file:packages-and-plugins.org][Packages and plugins]] and [[file:security-and-approvals.org][Security and approvals]].
+
+* Artifact hook
+
+The sole accepted hook name is =validate_artifact=. Its value must be a ground module-qualified callable:
+
+#+begin_src prolog
+hooks:_{validate_artifact:my_product:validate}
+#+end_src
+
+After a successful canonical text result, the host invokes =call(Hook, Result, Decision)=. Return =complete(Artifact)= or =approval(Artifact)=, with a JSON-compatible artifact dict. Failure, exception or an unusable decision fails the run. The default is =complete(_{text:Text})=.
+
+Artifact review is distinct from native per-tool effect approval. Accepting an artifact does not publish or deploy it: the host reports =published:false=. Hooks are trusted policy, not model-selected callables. An empty later hooks dict does not remove an existing hook.
+
+* Paths, packages and state identity
+
+| Item | Resolution |
+|------+------------|
+| Project directory | CLI canonicalizes with =realpathSync=; loader requires a readable directory |
+| CLI =--config=, =--plugin=, =--package= | UI canonicalizes the supplied path before launching the bundled host |
+| Direct API/host configuration paths | SWI =absolute_file_name= resolution from the host working directory; configuration files require readable Prolog sources |
+| Paths returned by an operator file | Host working directory, not the directory containing the operator file; use absolute paths |
+| Automatically discovered project file | Exactly =Project/.agentprolog/config.pl= |
+| Local package | Readable directory with =pack.pl= whose first term is =name(Name)= with atom =Name=; entry point =prolog/agentprolog_plugin.pl= |
+| =skill_files=, including inside named agents | Relative to the executable source file declaring that layer; requires readable files |
+| Default session state | =$XDG_STATE_HOME/agentprolog/SHA256(real-project-path)=; fallback =~/.local/state/agentprolog/...= |
+
+Packages are attached with the native SWI pack mechanism. Duplicate package names fail before attachment. Nothing is downloaded or installed. Package libraries and initialization are trusted code, not an isolation boundary.
+
+The output =sources= list includes executable product sources, package manifests, the operator file, and resulting skill-file paths. The session binding hashes the normalized effective configuration and bytes of listed source files. It does not claim to hash every transitive imported library or replace dependency pinning. A changed binding rejects reopening the same state directory with =session_configuration_mismatch=. Choose a separate state directory for a different agent/configuration; do not delete existing state to conceal the mismatch. See [[file:sessions-and-recovery.org][Sessions and recovery]].
+
+* Validation failures and recovery
+
+| Rejected condition | Typical loader error |
+|--------------------+----------------------|
+| Untrusted existing project file | =untrusted_project(Path)= |
+| Unknown/malformed operator option; singleton repeated | =invalid_option(Option)=; =duplicate_option= |
+| Multiple/malformed operator-file selectors or non-unique options predicate | =invalid_operator_config=; =non_unique_operator_options= |
+| Invalid first module term/export | =module_declaration_required(Path)= |
+| Source module already owned by another file or reserved runtime module | =module_conflict(...)=; =reserved_module(Module)= |
+| Duplicate source or package identity | =duplicate_source=; =duplicate_package(Name)= |
+| Missing/non-unique product predicate; non-dict result | =missing_config_predicate(Module)=; =non_unique_configuration(Path)=; =expected_dict= |
+| Unknown product key | =unknown_key(Key)= |
+| Duplicate/unsupported runtime option or unqualified closure | =duplicate_runtime_option=; =unsupported_runtime_option(Option)=; =qualified_handler_required(Handler)= |
+| Invalid or repeated capability | =invalid_capabilities(...)=; =duplicate_capability= |
+| Ungranted capability or missing corresponding registered tool | =capability_not_granted(Cap)=; =capability_without_tool(Name)= |
+| Invalid schema or duplicate tool name | =invalid_tool(...)=; =duplicate_tool_name= |
+| Unknown/excessive/invalid product budget key/value | =invalid_budget(Key,Value)= |
+| Unknown agent, nested agent configuration or repeated name | =unknown_agent(Name)=; =nested_agent_configuration(Name)=; =duplicate_agent(Name)= |
+| Selected agent widens parent capabilities | =agent_capability_expansion(Cap)= |
+| Unsupported hook | =unknown_hook(Key)= |
+
+Errors are commonly wrapped as =error(agentprolog_config(Code), Context)=. Ordinary SWI file, syntax, type and timeout errors can also occur; invalid operator ceilings may simply make the load fail rather than produce a tailored error. Do not depend on every failure using one wrapper.
+
+On a layer-load exception, the failed source is unloaded. Earlier code, package attachment and arbitrary initialization side effects are not transactionally rolled back. Correct the trusted source, stop the failed host and start a fresh process. Do not weaken validation or derive trust from repository/model instructions.
+
+* Related pages and implementation
+
+- [[file:configuration-cookbook.org][Configuration cookbook]]: complete compositions and launch examples.
+- [[file:agents.org][Named agents]]: inheritance and runtime limits.
+- [[file:providers-and-budgets.org][Providers and budgets]]: provider references and all budget defaults.
+- [[file:skills.org][Skills]] and [[file:markdown-import.org][Markdown import]]: native prompt units.
+- [[file:scripting.org][Scripting]] and [[file:api-reference.org][API reference]]: trusted host integrations.
+- [[file:troubleshooting.org][Troubleshooting]] and [[file:Home.org][Wiki home]].
+
+Implementation: [[file:../../prolog/agentprolog_config.pl][configuration loader]], [[file:../../prolog/agentprolog_prompt.pl][prompt projection]], [[file:../../prolog/agentprolog_session.pl][session host]], [[file:../../packages/conversation-ui/src/cli.js][CLI]], [[file:../../test/agentprolog_config_test.pl][configuration tests]] and [[file:../../test/agentprolog_agents_test.pl][named-agent/operator tests]]. Native value contracts above were checked against the runtime source matching the pin in [[file:../../flake.nix][flake.nix]]; updating that pin requires rechecking them.

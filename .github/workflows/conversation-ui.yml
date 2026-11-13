@@ -48,6 +48,7 @@ jobs:
             -s test/agentprolog_agents_test.pl \
             -s test/agentprolog_skills_test.pl \
             -s test/agentprolog_check_tool_test.pl \
+            -s test/documented_configs_test.pl \
             -s test/agentprolog_session_test.pl \
             -s test/agentprolog_workspace_tools_test.pl -g "run_tests,halt"
       - name: Generic agent through the canonical JS client

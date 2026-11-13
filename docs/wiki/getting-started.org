@@ -1,0 +1,175 @@
+:PROPERTIES:
+:ID: a81872e8-38b8-4e3a-8295-37bae597aab1
+:END:
+#+TITLE: Getting started with AgentProlog
+#+CREATED: [2026-11-12 Thu 22:08]
+#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: documentation
+#+ROAM_VISIBILITY: private
+#+CENSOR_PROFILE: strict
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:76e63fd6868d6b7e3735e24468e288fef04b6c8bf58b8cf7fcd332d0f5cb5a85; repository target docs/wiki/getting-started.org; source links in body
+#+AI_GENERATED: t
+#+AI_TAG: ai_3a6d3b9a44335400
+#+FILETAGS: :ai:ai_3a6d3b9a44335400:agentprolog:prolog-runtime:documentation:getting-started:
+
+#+PROPERTY: header-args :eval never-export
+
+* Understand the three pieces
+
+1. The terminal UI displays a canonical conversation and sends commands.
+2. The AgentProlog session host loads explicitly trusted configuration and saves session state.
+3. Prolog-RLM performs model calls and tool execution, enforcing native capabilities, budgets and effect approvals.
+
+The terminal UI is not itself a shell executor. A model can only use the tools registered by the trusted configuration and admitted by the operator's grants. A skill supplies instructions, not permissions.
+
+These instructions target the documentation checkout's implementation based on =0512eb8=. They are not a claim that an older or unmerged =main= contains every feature. First complete [[file:installation.org][Installation]] and verify the local =--help= output.
+
+* Start with an inspect-only session
+
+From the AgentProlog checkout:
+
+#+begin_src sh
+export AGENTPROLOG_DEMO_REPO="$PWD"
+export AGENTPROLOG_DEMO_PROJECT="$HOME/agentprolog-word-count"
+mkdir -p "$AGENTPROLOG_DEMO_PROJECT"
+install -d -m 700 "$HOME/.local/state/agentprolog-word-count-smoke"
+nix run .#agentProlog -- \
+  --project "$AGENTPROLOG_DEMO_PROJECT" \
+  --state "$HOME/.local/state/agentprolog-word-count-smoke"
+#+end_src
+
+At the prompt:
+
+#+begin_example
+/profile
+/inspect
+/help
+/quit
+#+end_example
+
+The workspace must exist. The state directory can be created by the host, but making it private explicitly is a good habit. Do not reuse this smoke-test state after changing the configuration below: use the distinct configured-session state shown later.
+
+* Make a small, explicit configuration
+
+This example registers only the existing =word_count= tool. It counts words in text passed as an argument; it does not scan files or send network requests. A model turn still requires a separately authorized provider.
+
+** Operator file: what you trust and grant
+
+Create =$AGENTPROLOG_DEMO_PROJECT/operator.pl= in your editor with this complete content:
+
+#+begin_src prolog
+:- module(word_count_demo_operator, [agentprolog_options/1]).
+
+agentprolog_options([
+    plugin(Plugin),
+    trusted_project(true),
+    allowed_capabilities([tool(word_count), context(peek)]),
+    budget_limits(_{max_model_calls:4, max_cost_usd:0.02})
+]) :-
+    getenv('AGENTPROLOG_DEMO_REPO', Repo),
+    directory_file_path(Repo, 'examples/plugins/word_count.pl', Plugin).
+#+end_src
+
+=--config= is an explicit trust decision for this executable Prolog module. The =plugin(Plugin)= option trusts another executable module. The =trusted_project(true)= option authorizes the project file in the next step. Read all three before launch, including imported code.
+
+The allowed-capabilities list is an operator ceiling. It permits the configuration to request =tool(word_count)= and =context(peek)=; it does not authorize arbitrary tools or bypass an approval for a write/process effect. The USD figure is a runtime accounting limit, not a guaranteed provider-side billing cap.
+
+** Project file: which provider and instructions
+
+Create the configuration directory:
+
+#+begin_src sh
+mkdir -p "$AGENTPROLOG_DEMO_PROJECT/.agentprolog"
+#+end_src
+
+Create =$AGENTPROLOG_DEMO_PROJECT/.agentprolog/config.pl= with:
+
+#+begin_src prolog
+:- module(word_count_demo_project, [agentprolog_config/1]).
+:- use_module(library(rlm_chain), []).
+
+agentprolog_config(_{
+    profile:word_count_demo,
+    runtime_options:[
+        provider(Provider),
+        provider_name(openrouter),
+        prompt_compile_mode(all_tools),
+        system_prompt("Use word_count when asked to count words. Tool results are opaque: inspect the result alias with context_peek before reporting the count.")
+    ]
+}) :-
+    rlm_chain:openrouter_provider('openai/gpt-4.1-mini', Provider).
+#+end_src
+
+This is an explicit OpenRouter example, not an automatic fallback or a recommendation to buy access. The constructor selects the provider/model and uses the runtime's =OPENROUTER_API_KEY= environment credential reference. Keep the credential value out of both files. Use only an existing account you are authorized to call. If you use another provider, deliberately replace the provider construction and name using [[file:providers-and-budgets.org][Providers and budgets]]; do not guess a constructor or silently switch routes.
+
+The two module names are intentionally different. Operator modules export =agentprolog_options/1=; project/plugin modules export =agentprolog_config/1=. Both predicates must yield exactly one result. This example uses =AGENTPROLOG_DEMO_REPO= only to locate the approved plugin, not for credentials; preserve that exported absolute path when restarting.
+
+* Authorize a first model turn
+
+Only after deciding to permit the provider call, make your existing =OPENROUTER_API_KEY= available through your normal credential mechanism. Do not paste it into the conversation. Then launch from the AgentProlog checkout:
+
+#+begin_src sh
+install -d -m 700 "$HOME/.local/state/agentprolog-word-count-configured"
+nix run .#agentProlog -- \
+  --project "$AGENTPROLOG_DEMO_PROJECT" \
+  --state "$HOME/.local/state/agentprolog-word-count-configured" \
+  --config "$AGENTPROLOG_DEMO_PROJECT/operator.pl"
+#+end_src
+
+Do not also add =--trust-project= or =--allow-tool= flags to this command: the operator file already supplies the single-valued trust/grants options, and duplicate options fail instead of being merged by guesswork.
+
+At the prompt, inspect the advertised profile and type one objective:
+
+#+begin_example
+/profile
+Use word_count to count the words in "one two three". Inspect the opaque result with context_peek, then report the observed count. Do not use any other tools.
+#+end_example
+
+The expected tool output contains =count: 3=. This is the expected behavior of the real plugin, not a promise that every model will choose it correctly. Check the Tools and Usage sections with =/inspect=. An assistant sentence saying “3” without a successful =word_count= observation is not proof the tool ran.
+
+Native tool values are opaque context. The model receives a result reference/alias, not necessarily an inline copy of the returned JSON; =context_peek= inspects that value under the granted =context(peek)= capability. If the model claims it cannot see a result, ask it to inspect the alias rather than granting arbitrary new tools.
+
+If you do not have authorized provider access, stop after configuration inspection or use the deterministic repository tests. Missing credentials are not permission to obtain new keys or invoke another provider.
+
+* Everyday terminal commands
+
+| Command | Meaning |
+|---------+---------|
+| Plain text | Submit an objective or follow-up as =session.turn= |
+| =/profile= | Display the runtime-advertised descriptor/profile |
+| =/inspect= | Render the current canonical view, tools, approvals, evidence and usage |
+| =/create= / =/select= | Initialize/select or refresh the configured session; not an interactive workspace picker |
+| =/answer ID TEXT= | Answer the exact pending question |
+| =/approve ID DECISION= | Submit an offered decision for an exact pending approval |
+| =/cancel= | Request cancellation of the current run |
+| =/reconnect= | Restart the connection/sidecar and obtain its checkpoint |
+| =/resume= | Explicitly start the previous objective as a new run, potentially making new calls |
+| =/quit= | Close the sidecar and exit |
+
+=/inspect= renders the local canonical view; it is not a shell command or an extra artifact verifier. =/reconnect= is not the same as =/resume=: resuming can repeat an objective and incur additional provider use. A pending native operation is not silently replayed after a process restart.
+
+* When a tool needs approval
+
+The word-count tool is read-only. The coding tutorial adds native write and process effects, which can suspend execution for an individual decision. Review the displayed operation, target, arguments and content preconditions. Then copy the actual approval ID and one of its offered choices, for example:
+
+#+begin_example
+/approve ACTUAL_PENDING_ID allow_once
+#+end_example
+
+Or deny it using the offered =deny= choice. =ACTUAL_PENDING_ID= is a placeholder, not a usable ID. Do not approve all pending requests indiscriminately; permission for one file creation is not permission for a later edit, command or publication. A capability grant only admits the tool into native mediation; it is not a blanket effect approval.
+
+If a run stops or disconnects, inspect the checkpoint before proceeding. “Stream finished” alone is not success: check =Run outcome= and concrete tool evidence. A complete run does not prove an external application passed acceptance tests.
+
+* Where to go next
+
+- [[file:tutorial-todo-app.org][Build and independently verify a CRUD todo application]].
+- [[file:configuration-reference.org][Configuration reference]] and [[file:configuration-cookbook.org][cookbook]] for complete fields and additional examples.
+- [[file:security-and-approvals.org][Security and approvals]] for the trusted-code boundary. Trusted Prolog is executable and is not sandboxed by tool grants.
+- [[file:sessions-and-recovery.org][Sessions and recovery]] for reconnect, private state and configuration changes.
+- [[file:scripting.org][Scripting]] for supported automation. There are no CLI =--json= or =--headless= switches.
+- [[file:Home.org][Wiki home]].
+
+* Source and test pointers
+
+The behavior above comes from [[file:../../packages/conversation-ui/src/cli.js][the CLI]], [[file:../../prolog/agentprolog_config.pl][the configuration loader]], [[file:../../prolog/agentprolog_session.pl][the session host]] and [[file:../../examples/plugins/word_count.pl][the word-count plugin]]. Trust refusal, operator options, capability ceilings and real native invocation are covered by [[file:../../test/agentprolog_config_test.pl][configuration tests]] and [[file:../../test/agentprolog_agents_test.pl][agent/operator tests]]. Run the local gate described in [[file:development-and-testing.org][Development and testing]] to validate your checkout without paid calls.

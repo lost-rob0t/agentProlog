@@ -1,0 +1,262 @@
+:PROPERTIES:
+:ID: 372772c7-5f52-43db-be1a-ff880538a129
+:END:
+#+TITLE: Security and approvals
+#+CREATED: [2026-11-12 Thu 22:08]
+#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: documentation
+#+ROAM_VISIBILITY: private
+#+CENSOR_PROFILE: strict
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:23a23858ad3742fe37002a0bcd0f0fc82c768f95f38d749c46dda7547c4a3a82; repository target docs/wiki/security-and-approvals.org; source links in body
+#+AI_GENERATED: t
+#+AI_TAG: ai_c8322ed5911c9c12
+#+FILETAGS: :ai:ai_c8322ed5911c9c12:agentprolog:prolog-runtime:documentation:security-and-approvals:
+
+#+PROPERTY: header-args :eval never-export
+#+description: Trust boundaries, operator grants, exact approvals and bounded workspace execution.
+
+[[file:Home.org][Wiki home]] | [[file:sessions-and-recovery.org][Sessions and recovery]] | [[file:troubleshooting.org][Troubleshooting]]
+
+* Security model
+
+AgentProlog is a trusted local application, not a sandbox for arbitrary Prolog,
+plugins, generated programs or hostile shared directories. Prolog-RLM owns native
+execution, capabilities, authority, effects and accounting; the terminal client
+only sends commands and projects canonical state.
+
+This page describes the implementation at AgentProlog =0512eb8=. Runtime authority
+is pinned by [[file:../../flake.nix][flake.nix]] and [[file:../../flake.lock][flake.lock]]
+to =4716ba8aa0bbf3fa1b96d80e8ed8e91d99973c85=. Deterministic test coverage is not
+a claim that every browser, production deployment or remote-provider gate passed.
+
+* Executable configuration versus inert skills
+
+| Input | Treatment | Operator responsibility |
+|-------+-----------+-------------------------|
+| =--config FILE= | Consults a module exporting =agentprolog_options/1= | Trust the entire file and its dependencies as executable Prolog |
+| =--plugin FILE= | Consults a module exporting =agentprolog_config/1= | Explicitly approve that executable source |
+| =--package DIR= | Attaches a local SWI pack and loads =prolog/agentprolog_plugin.pl= | Trust the pack and imported executable code; nothing is downloaded by this loader |
+| =PROJECT/.agentprolog/config.pl= | Refuses to load unless =--trust-project= was supplied | Review the checkout before granting project trust |
+| Native =skill_files= | Reads one =agentprolog_skills([...]).= data term, never consults it | Review instructions and provenance; do not confuse instructions with grants |
+| Model output, retrieved text, wire commands | Data, not a source of launch flags or trusted callables | Never promote this content into trusted configuration automatically |
+
+The config loader checks the first module declaration, allowed keys, handler
+shapes and returned data. It limits enumeration of the configuration predicate
+to five seconds and requires exactly one answer. Those checks do *not* confine
+loading directives, imported modules, initialization effects or trusted callbacks.
+Failed loading cannot undo arbitrary effects already executed. Stop the sidecar
+after a loading failure and start a fresh process after correction.
+
+Native skills reuse the upstream =prompt_unit= compiler IR. Their loader rejects
+directives, additional terms, duplicate skill identities, =mandatory_context:true=
+and =activation:always=. Limits include 64 files, 128 total skills, 1 MiB per
+file and 32,768 UTF-8 bytes per skill body. A skill supplies neither an executable
+handler nor a capability or authority grant. Inert serialization prevents
+consult-time execution; it does not make instruction content inherently reliable.
+Trusted =system_prompt= configuration is a separate, executable-config-controlled
+source of mandatory instructions.
+
+Sources: [[file:../../prolog/agentprolog_config.pl][configuration loader]],
+[[file:../../prolog/agentprolog_skills.pl][inert skill reader]],
+[[file:../../prolog/agentprolog_prompt.pl][canonical prompt projection]],
+[[file:../../test/agentprolog_config_test.pl][trust tests]],
+[[file:../../test/agentprolog_skills_test.pl][skill tests]].
+
+* Capabilities and budgets: ceilings, not self-grants
+
+The operator chooses =allowed_capabilities([...])= in trusted operator configuration,
+or supplies exact =--allow-tool NAME=, =--allow-context OP= and =--allow-model NAME=
+flags. Product/project configurations may request only capabilities in that list.
+A selected named agent may only preserve or narrow its parent's capabilities and
+budget. Its registered tools still need their exact native tool capabilities.
+
+For example, =tool(workspace_read)= does not grant =tool(workspace_write)= or
+=context(peek)=. The =rlm= entrypoint requires the model capability matching the
+configured provider name. Do not interpret an empty capability list as an
+offline/no-provider guarantee: the generic =direct= entrypoint can still attempt
+native model I/O. No tools or context grants is not the same as no model request.
+
+Operator =budget_ceiling(Dict)= can replace default ceilings;
+=budget_limits(Dict)= narrows them. Ordinary configuration layers may replace
+budget keys only within the effective operator ceiling. A named agent is further
+bounded by the already-merged parent budget. Unknown or out-of-range keys fail
+loading rather than silently falling back. Native registry, capabilities and
+budget cannot be replaced through =runtime_options=.
+
+| Default bound | Value |
+|---------------+-------|
+| Model calls / tool calls / iterations | 8 / 16 / 16 |
+| Total tokens / output bytes | 32,768 / 262,144 |
+| Recursion depth / concurrent subcalls | 1 / 2 |
+| Context operations / native calls per batch | 16 / 8 |
+| Native time limit | 120 seconds |
+| Reported cost guard | USD 0.25 |
+
+These ceilings mediate native operations, not arbitrary trusted plugin Prolog.
+Keep grants narrow, use dedicated workspaces and avoid sensitive files in any
+workspace a model is authorized to read.
+
+Source: [[file:../../prolog/agentprolog_config.pl][defaults, allowed options and layer merge]].
+
+* Exactly what the UI can approve
+
+The generic host offers exactly =allow_once= and =deny=:
+
+#+begin_example
+/inspect
+/approve APPROVAL_ID allow_once
+/approve APPROVAL_ID deny
+#+end_example
+
+Use an actual pending ID and one of the choices displayed for that approval;
+the two approval commands above are alternatives, not a sequence to run against
+one ID. Client-side checks reject stale or unoffered choices, and the host checks
+them again. =allow_session=, =dangerous=, =yolo=, custom edits and approval-mode
+changes are not commands exposed by this terminal application.
+
+Upstream's authority lattice is =approve_diff < allow_once < allow_session < dangerous=.
+Unset native authority defaults to =approve_diff=; children cannot widen a parent
+mode. These upstream host APIs are *not* the generic UI's choice list. In
+particular, selecting =allow_once= for a pending operation does not switch the
+whole session into an automatic approval tier. The generic configuration schema
+does not expose an authority-mode option.
+
+There are two distinct review paths:
+
+| Review | What acceptance does | What it does not do |
+|--------+----------------------+---------------------|
+| Native tool approval | Resolves canonical authority for an exact pending normalized operation; the retained native cursor continues | Does not replay model calls, bypass capabilities, or authorize a changed target/payload |
+| Trusted artifact hook returning =approval(Artifact)= | Accepts the candidate as an artifact and finishes the run with =published:false= | Does not publish, deploy, commit or imply that generated code passed independent tests |
+
+For native direct execution, the worker keeps its registry/effect store and waits
+for the decision. It resolves approval through =rlm_approve/2= or =rlm_deny/3= and
+resumes the native cursor. Denial, owner cancellation and restart must not be
+worked around by resubmitting the same mutation. Cancellation is not rollback
+of a side effect that already executed; see [[file:sessions-and-recovery.org][recovery semantics]].
+
+The resumable native approval bridge above is a =direct= mode feature in this
+host. Typed-plan approvals produced under =mode:rlm= do not enter that same
+product continuation. Do not select RLM mode expecting identical interactive
+write approvals, and do not bypass native authority to compensate.
+
+Sources: [[file:../../prolog/agentprolog_session.pl][host approval handling]],
+[[file:../../packages/conversation-ui/src/client.js][pending-choice checks]],
+[[file:../../test/agentprolog_workspace_tools_test.pl][native authority tests]],
+[[https://github.com/lost-rob0t/prolog-rlm/blob/4716ba8aa0bbf3fa1b96d80e8ed8e91d99973c85/prolog/rlm_authority.pl][pinned upstream authority implementation]].
+
+* Workspace confinement and content preconditions
+
+Trusted configuration chooses the workspace root, not model arguments. Keep the
+preflight/execute =tool_handler= pair intact when registering these tools.
+
+| Tool | Required precondition |
+|------+-----------------------|
+| =workspace_read= | Existing bounded UTF-8 regular file; content hash must still match preflight at execution |
+| =workspace_create= | Destination absent; existing parent directory; never overwrites |
+| =workspace_write= | Existing file with exact =expected_sha256=; full replacement content |
+| =workspace_modify= | Existing file with exact =expected_sha256=; nonempty =old_text= occurs exactly once |
+
+Read the current file, inspect its returned SHA-256, and use that observed hash
+for write/modify. Revalidation after an approval wait rejects intervening edits
+with =stale_content=. Approval is not permission to overwrite someone else's
+changed content. Existing files must be repaired with write/modify, not create.
+
+Paths must be nonempty workspace-relative paths. Absolute paths, empty segments,
+=.=, =..=, backslashes, control characters, directory targets and symlink components
+are rejected. Parents must already exist. Files and replacement content are
+limited to 65,536 UTF-8 bytes. These tools do not create directories, delete
+files, follow symlinks, invoke a shell or grant general process execution.
+
+Mutation installs a sibling temporary file: hard-link creation preserves the
+absent-destination requirement; replacement uses rename. New files are created
+owner-read/write only. Replacement does not preserve executable bits or other
+metadata. Temporary files are cleaned on failure.
+
+*These are not OS sandbox guarantees.* Static symlink escapes and changed content
+are checked, but path checks and later opens are not one descriptor-relative
+atomic operation. A hostile concurrent process can race path replacement
+(TOCTOU). Process-local mutexes do not lock out other programs. Use a dedicated
+workspace not writable by untrusted concurrent actors; adversarial isolation
+requires an OS sandbox or no-follow descriptor-relative APIs not supplied here.
+
+Sources: [[file:../../prolog/agentprolog_workspace_tools.pl][filesystem implementation]],
+[[file:../../test/agentprolog_workspace_tools_test.pl][content and containment tests]].
+
+* Process checking is syntax checking, not program acceptance
+
+=workspace_check= declares =effect:process= and uses native process authority.
+Trusted configuration fixes the Node executable. Model arguments contain only
+the workspace-relative =path=, not a command, shell or arbitrary argv.
+
+The handler reuses bounded workspace-read preflight/revalidation, then invokes
+=Node --check ABSOLUTE_PATH= with the workspace as cwd, =env([])=, null stdin/stdout,
+a five-second inner deadline and at most 8,192 stderr characters. It returns
+=path=, =sha256=, =exit_code= and =output=. Schema limits additionally bound handler
+time/output. Inspect =exit_code=: a successful *tool invocation* can report a
+nonzero compiler exit. =tool_finished= or =outcome.status:ok= alone is not syntax
+success.
+
+=--check= parses without executing the source. A file containing a runtime throw
+can therefore pass. The hash is from the prior bounded read; Node subsequently
+opens the pathname itself, so concurrent source replacement remains a TOCTOU
+limitation. This tool proves neither HTTP behavior, browser interactions, safe
+dependencies nor deployment readiness.
+
+The separate todo checker executes generated code under Node =--permission= with
+workspace-only filesystem allowances, no child-process permission, a clean
+environment and a bounded heap. It tests loopback HTTP CRUD and HTML markers.
+It is not an OS/network sandbox, browser automation or persistence test.
+
+Sources: [[file:../../prolog/agentprolog_check_tool.pl][fixed process handler]],
+[[file:../../test/agentprolog_check_tool_test.pl][parse-versus-execute tests]],
+[[file:../../packages/conversation-ui/test/todo-app-proof.js][independent HTTP checker]].
+
+* Secrets, state and diagnostics
+
+- Use provider environment references, such as =credential(env('ZAI_API_KEY'))=,
+  rather than literal credentials in configuration, prompts or tool arguments.
+- The normal UI-spawned sidecar inherits the launching environment. =shell:false=
+  prevents shell interpretation; it does not remove credentials from that process.
+  Do not treat trusted handlers as environment-isolated.
+- =workspace_check= uses an empty child environment. The independent generated-app
+  checker supplies only PATH, workspace HOME and NODE_ENV, not provider secrets.
+- The session's failure projection emits only known categorical fields and drops
+  raw provider exception terms/URLs/payloads. This is not universal secret scanning:
+  trusted plugin stderr, tool arguments/results, file contents and application
+  output can still contain sensitive information.
+- Store session state in a private directory. =session.json= contains objectives,
+  projected messages, tool data, approval material and request receipts; =effects.db=
+  contains native effect bookkeeping. Neither is documented as encrypted storage.
+  The host creates directories but does not enforce an owner-only directory mode;
+  choose permissions and umask before launch. Never upload raw state indiscriminately.
+- Terminal-control stripping protects display, not confidentiality.
+
+Sources: [[file:../../prolog/agentprolog_session.pl][safe failure projection and persistence]],
+[[file:../../packages/conversation-ui/src/client.js][spawn and stderr forwarding]],
+[[file:../../packages/conversation-ui/src/render.js][terminal-safe rendering]].
+
+* Costs and evidence boundaries
+
+=max_cost_usd= is a runtime guard based on reported provider usage, not a monetary
+reservation or guaranteed provider billing cap. Unknown cost remains unknown,
+not zero; a failed run may still have consumed billable calls. A final turn's
+usage is not whole-session or cross-invocation spend.
+
+The opt-in todo runner defaults to a USD 0.04 target (configurable only above zero
+and at most USD 0.10), at most three generation/verification-driven turns, and
+known cumulative cost accounting within that invocation. It blocks automatic
+repair when cost is unknown, and does not reserve remaining dollars before the
+next provider call. Separate invocations start separate accounting; reusing an
+artifact directory does not create a cross-invocation spending ledger. Previous
+operator permission to spend is not standing authorization for new calls.
+
+Independent recorded-artifact verification makes no new model request, but does
+execute the recorded generated program and writes an evidence receipt. Its
+current route check specifically expects OpenRouter =openai/gpt-4.1-mini=; do not
+advertise it as a generic verifier for every accepted provider/model combination.
+Provider-side restrictions are required when a hard monetary ceiling is needed.
+
+Sources: [[file:../../packages/conversation-ui/test/todo-app-acceptance.js][opt-in runner]],
+[[file:../../packages/conversation-ui/test/verify-recorded-todo.js][recorded proof]],
+[[file:../../.prolog/kb/acceptance.pl][durable accounting and acceptance boundaries]].

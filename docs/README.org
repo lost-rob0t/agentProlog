@@ -1,0 +1,54 @@
+:PROPERTIES:
+:ID: 7076aed3-51fe-45c1-ad03-6457e3f29204
+:END:
+#+TITLE: AgentProlog Documentation Map
+#+CREATED: [2026-11-12 Thu 22:08]
+#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: documentation
+#+ROAM_VISIBILITY: private
+#+CENSOR_PROFILE: strict
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:2ab7dedfec41a7db58de2804186fbc090d016dd4a471d549f466ec201af38891; repository target docs/README.org; source links in body
+#+AI_GENERATED: t
+#+AI_TAG: ai_2a7206eddea83988
+#+FILETAGS: :ai:ai_2a7206eddea83988:agentprolog:prolog-runtime:documentation:documentation-readme:
+
+#+PROPERTY: header-args :eval never-export
+
+* User-facing wiki
+
+Start with [[file:wiki/Home.org][the wiki home]] or follow
+[[file:wiki/_Sidebar.org][the complete navigation tree]]. The wiki provides
+installation, a complete todo-app tutorial, configuration and API references,
+many executable examples, skills/packages, scripting, security, recovery,
+troubleshooting, integration and development guidance.
+
+* Detailed implementation notes
+
+These existing notes explain narrower implementation contracts. Prefer the wiki
+for a first walkthrough and the code/tests for executable truth.
+
+- [[file:canonical-conversation-ui.org][Canonical conversation UI and protocol]]
+- [[file:prolog-configuration.org][Prolog configuration implementation notes]]
+- [[file:workspace-tools.org][Confined workspace tools]]
+- [[file:todo-app-acceptance.org][CRUD todo-app acceptance]]
+- [[file:real-model-acceptance.org][Manual provider-specific filesystem acceptance]]
+- [[file:deepseek-harness-plugin.org][Historical DeepSeek Harness bridge design]]
+- [[file:migration-matrix.org][Historical migration matrix]]
+- [[file:adr/0003-prolog-agents-skills-packages-crud.md][Architecture decision and scope]]
+
+* Source and tests
+
+- [[file:../prolog/][Product Prolog implementation]]
+- [[file:../packages/conversation-ui/][Canonical client and terminal UI]]
+- [[file:../examples/configurations/][Executable Prolog configurations]]
+- [[file:../examples/scripts/][Executable scripting examples]]
+- [[file:../test/][Native product regression tests]]
+- [[file:../scripts/check.sh][Deterministic verification entrypoint]]
+
+* Format and publication
+
+Canonical documentation is Org mode. Old Markdown filenames may remain only as
+compatibility pointers to their Org counterparts. AI provenance is explicit in
+each authored Org file. Private metadata is the default; this repository-backed
+wiki is not a claim that a public site was exported or deployed.

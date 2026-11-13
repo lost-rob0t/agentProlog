@@ -1,0 +1,42 @@
+:PROPERTIES:
+:ID: 8653589d-f359-4d60-80ee-ad2ea51249a8
+:END:
+#+TITLE: AgentProlog Wiki Navigation
+#+CREATED: [2026-11-12 Thu 22:08]
+#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: documentation
+#+ROAM_VISIBILITY: private
+#+CENSOR_PROFILE: strict
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:47a953233aa3699d438ab126dde53408776c8dedd2670a848462a35c5252f475; repository target docs/wiki/_Sidebar.org; source links in body
+#+AI_GENERATED: t
+#+AI_TAG: ai_6d332b4eef898e4b
+#+FILETAGS: :ai:ai_6d332b4eef898e4b:agentprolog:prolog-runtime:documentation:sidebar:
+
+#+PROPERTY: header-args :eval never-export
+
+* Start
+- [[file:Home.org][Wiki home]]
+- [[file:installation.org][Installation]]
+- [[file:getting-started.org][Getting started]]
+- [[file:tutorial-todo-app.org][Todo-app tutorial]]
+
+* Configure and extend
+- [[file:configuration-reference.org][Configuration reference]]
+- [[file:configuration-cookbook.org][Configuration examples]]
+- [[file:agents.org][Named agents]]
+- [[file:providers-and-budgets.org][Providers and budgets]]
+- [[file:skills.org][Native skills]]
+- [[file:markdown-import.org][Markdown import]]
+- [[file:packages-and-plugins.org][Packages and plugins]]
+- [[file:scripting.org][Scripting]]
+- [[file:api-reference.org][API reference]]
+
+* Operate and develop
+- [[file:security-and-approvals.org][Security and approvals]]
+- [[file:sessions-and-recovery.org][Sessions and recovery]]
+- [[file:troubleshooting.org][Troubleshooting]]
+- [[file:architecture.org][Architecture]]
+- [[file:development-and-testing.org][Development and testing]]
+- [[file:integrations.org][Integrations]]
+- [[file:../README.org][Documentation map]]

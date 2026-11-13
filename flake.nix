@@ -63,7 +63,7 @@
         apps.import-skill = flake-utils.lib.mkApp { drv = importSkill; };
 
         devShells.default = pkgs.mkShell {
-          packages = [ upstream pkgs.nodejs_22 importSkill ];
+          packages = [ upstream pkgs.nodejs_22 pkgs.python3 importSkill ];
         };
 
         checks.conversation-cli = pkgs.runCommand "agentprolog-conversation-cli" {
@@ -81,6 +81,7 @@
             -s ${self}/test/agentprolog_agents_test.pl \
             -s ${self}/test/agentprolog_skills_test.pl \
             -s ${self}/test/agentprolog_check_tool_test.pl \
+            -s ${self}/test/documented_configs_test.pl \
             -s ${self}/test/agentprolog_session_test.pl \
             -s ${self}/test/agentprolog_workspace_tools_test.pl -g "run_tests,halt"
           touch "$out"
@@ -92,6 +93,28 @@
           agentprolog-import-skill ${self}/skills/markdown-to-prolog "$TMPDIR/imported.pl"
           ${upstreamSwipl} -q -s ${self}/prolog/agentprolog_skills.pl \
             -g "load_skill_units(['$TMPDIR/imported.pl'],[_]),halt"
+          touch "$out"
+        '';
+
+        checks.documentation = pkgs.runCommand "agentprolog-org-documentation" {
+          nativeBuildInputs = [ upstream pkgs.nodejs_22 pkgs.python3 ];
+        } ''
+          export LANG=C.UTF-8
+          export LC_ALL=C.UTF-8
+          python3 -B ${self}/scripts/check-docs.py --root ${self}
+          python3 -B -m unittest discover -s ${self}/test -p test_documentation.py
+          python3 -B ${self}/scripts/check-tutorial.py \
+            --runtime-lib ${upstream}/share/swi-prolog/pack/prolog_rlm/prolog \
+            --swipl ${upstreamSwipl} --node ${pkgs.nodejs_22}/bin/node
+          touch "$out"
+        '';
+
+        checks.documented-scripts = pkgs.runCommand "agentprolog-documented-scripts" {
+          nativeBuildInputs = [ pkgs.nodejs_22 pkgs.bash ];
+        } ''
+          export HOME="$TMPDIR/home"
+          mkdir -p "$HOME"
+          node --test ${self}/packages/conversation-ui/test/documented-scripts.test.js
           touch "$out"
         '';
 

@@ -1,0 +1,264 @@
+:PROPERTIES:
+:ID: cd2293ad-ded8-4546-8eac-7b12f2838571
+:END:
+#+TITLE: Import Markdown Agent Skills
+#+CREATED: [2026-11-12 Thu 22:08]
+#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: documentation
+#+ROAM_VISIBILITY: private
+#+CENSOR_PROFILE: strict
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:81200d23dd110998032f6686b8cbc3492976567c928d702985946cbaecedcf5d; repository target docs/wiki/markdown-import.org; source links in body
+#+AI_GENERATED: t
+#+AI_TAG: ai_0b40855b4f5334d1
+#+FILETAGS: :ai:ai_0b40855b4f5334d1:agentprolog:prolog-runtime:documentation:markdown-import:
+
+#+PROPERTY: header-args :eval never-export
+
+* Purpose and trust boundary
+
+=agentprolog-import-skill SKILL_ROOT OUTPUT.pl= converts existing Markdown
+=SKILL.md= packages to the same inert =prompt_unit= data accepted by
+[[file:skills.org][native skills]]. It uses upstream =rlm_skill=; it does not execute Markdown,
+run packaged scripts, consult output, install tools, or fetch packages.
+
+The source is a directory containing one =SKILL.md= package or a tree of
+packages, not a bare Markdown filename or a remote URL. Source packages remain
+useful for human review and separately accessed resources. This is a one-time
+conversion, not synchronization or a resource vendoring operation.
+
+* Minimal conversion
+
+Create the following source tree:
+
+#+begin_example
+skill-source/
+  acceptance-check/
+    SKILL.md
+#+end_example
+
+The =SKILL.md= contents are shown verbatim below. This Markdown is import input,
+not the format of the wiki page:
+
+#+begin_example
+---
+name: acceptance-check
+description: Check an implementation against explicit acceptance evidence.
+---
+
+List the acceptance criteria. For each criterion, identify observed evidence.
+Mark missing evidence explicitly. Do not claim a test ran without its result.
+#+end_example
+
+Run from the AgentProlog repository with an existing, writable output directory:
+
+#+begin_src sh
+nix run .#import-skill -- /absolute/path/to/skill-source \
+  /absolute/path/to/project/skills/imported-acceptance.pl
+#+end_src
+
+Or, in an environment containing the packaged command:
+
+#+begin_src sh
+agentprolog-import-skill /absolute/path/to/skill-source \
+  /absolute/path/to/project/skills/imported-acceptance.pl
+#+end_src
+
+Choose one invocation, not both against the same destination: existing output
+is deliberately not overwritten. Nix may need its normal build/input access;
+the importer itself performs local parsing and writing, not provider calls.
+
+The output is one =agentprolog_skills([...]).= term. Each converted unit has
+=unit:skill('acceptance-check')=, the body string, canonical policy/selection
+metadata, and Markdown provenance. Formatting is machine serialization; do
+not depend on a particular indentation or dict-key order.
+
+Inspect and validate before activating it:
+
+#+begin_src sh
+prolog-rlm-swipl -q -s prolog/agentprolog_skills.pl \
+  -g "load_skill_units(['/absolute/path/to/project/skills/imported-acceptance.pl'],[U]),get_dict(unit,U,Identity),get_dict(provenance,U,Source),writeln(Identity),writeln(Source),halt"
+#+end_src
+
+Then use this reviewed =PROJECT/.agentprolog/config.pl=:
+
+#+begin_src prolog
+:- module(my_imported_acceptance_configuration,[agentprolog_config/1]).
+
+agentprolog_config(_{
+    skill_files:['../skills/imported-acceptance.pl'],
+    selected_skills:['acceptance-check']
+}).
+#+end_src
+
+Activate the trusted project configuration through the normal CLI, as described
+in [[file:configuration-reference.org][Configuration reference]]. Importing did not itself trust this executable
+configuration or grant capabilities. See [[file:configuration-cookbook.org][Configuration cookbook]] for composition.
+
+* What the upstream loader accepts
+
+=SKILL.md= must begin with a =---= frontmatter delimiter, contain nonempty
+=name= and =description= fields, and close the frontmatter with =---=. Use the
+simple scalar format above. The implemented parser handles selected frontmatter
+fields and a specific JSON metadata extension; it is not a general YAML engine.
+
+- Names are 1–64 characters, use lowercase letters/digits with internal
+  hyphens, begin and end in a letter/digit, and contain no consecutive =--=.
+- Descriptions are 1–1,024 characters. Use a single-line scalar; do not assume
+  YAML block-scalar descriptions are interpreted like a full YAML parser.
+- Names must be unique across discovered packages. The code does not require a
+  directory basename to equal its skill's name.
+- =disable-model-invocation: true= maps to an explicit-user invocation policy;
+  default conversion then gives the unit =available:false=.
+- By default, directories named =.git=, =deprecated=, and =in-progress= are
+  skipped during package discovery. The importer does not expose an
+  =include_deprecated= flag.
+- Discovery stops descending when a directory contains =SKILL.md=; it treats
+  that directory as the package rather than discovering nested packages below
+  it. Use sibling package directories under a common root.
+
+Disabled invocation deserves special care: the product does not automatically
+turn an imported =available:false= unit into an available one when named in
+=selected_skills=. Explicit selection cannot override availability. Review and
+intentionally adapt the source/conversion policy rather than assuming a CLI
+slash-command invocation path exists for imported skills.
+
+** Optional routing metadata
+
+The supported extension is JSON under the exact indented
+=metadata: / prolog-rlm: |= shape. For example, this is a complete alternate
+source package:
+
+#+begin_example
+---
+name: acceptance-check
+description: Check acceptance evidence for an implementation.
+metadata:
+  prolog-rlm: |
+    {"schema":1,"aliases":["acceptance review"],"priority":120,"triggers":[{"kind":"keyword","value":"acceptance","weight":100}]}
+---
+
+Compare requirements with observed evidence and report gaps.
+#+end_example
+
+Supported extension keys are =schema=, =activation=, =aliases=, =category=,
+=conflicts=, =priority=, =requires=, =requires_capability=, =suggests=,
+=supersedes=, and =triggers=. The schema must be =1=; unknown keys are errors.
+=activation= accepts only an object containing the boolean =automatic=.
+=requires_capability= is supported only as =null= or omitted in this Markdown
+extension, not as a way to request arbitrary execution authority.
+
+Relations contain objects such as ={"kind":"skill","name":"other-skill"}=
+(also =tool= or =resource=). Aliases/triggers are bounded to 32 entries;
+relation lists to 64 entries; extension identifiers/text to 128 characters;
+priority and trigger weights to integers from 0 through 100,000. These are
+selection hints and dependency identities, not definitions of the referenced
+tool/resource or permission grants.
+
+* Exact source bounds and path checks
+
+| Source-loader bound | Maximum |
+|---------------------+---------|
+| Configured skill roots upstream | 16 (this importer supplies one) |
+| Packages per root | 256 |
+| Packages per catalog | 512 |
+| Each =SKILL.md= file | 102,400 bytes |
+| Frontmatter counter | 65,536 UTF-8 bytes, counting parsed lines plus newline bytes |
+| Converted body | 32,768 UTF-8 bytes |
+| Descendant depth | 16 |
+| Directory entries visited | 4,096 per root scan and per skill resource scan |
+| Indexed text resources per skill | 128 |
+| Each indexed text resource | 524,288 bytes |
+| Aggregate indexed text resources per skill | 4,194,304 bytes |
+
+The native output loader has its own stricter aggregate limits: at most 64
+files, 128 units in total, 1,048,576 bytes per file, and 32,768 UTF-8 bytes per
+body. The importer can discover more units than native loading permits; a
+successful conversion is not a guarantee that the resulting native file will
+load. Always run the native validation step.
+
+The upstream loader canonicalizes a readable source root and confines package
+paths beneath it. Descendant symlinks and path escapes are rejected; resource
+paths must be relative and may not contain =..=. Indexed resources are confined
+inside the skill directory as well as the source root. File hashes are checked
+again when instruction/resource content is read to reject changes after
+indexing. This is bounded source admission, not a sandbox for executable
+plugins. Do not assume native =skill_files= paths receive these same confinement
+checks.
+
+* Provenance and resources: what survives
+
+Each imported unit receives provenance shaped like:
+
+#+begin_example
+markdown(PATH/TO/SKILL.md,SKILL_FINGERPRINT)
+#+end_example
+
+The upstream fingerprint includes the source label (=markdown_import=),
+relative package directory, full instruction SHA-256, and indexed resource
+names/sizes/fingerprints. The output stores the instruction body and compiler
+metadata. Loading that output later adds its native file path and SHA-256
+around the original provenance. Provenance is evidence of source identity,
+not an endorsement of the body, a signature, or a guarantee of immutable files.
+
+The conversion does not copy resource files, embed their contents, rewrite
+relative links, install scripts, or register resource-reading tools. The
+imported unit does not retain the complete upstream =Skill= resource catalog.
+Keep original source packages if separate resources are needed, and arrange
+their access explicitly through an appropriate trusted host integration. Merely
+keeping a package directory on disk does not automatically expose it to the
+model. An indexed shell/Prolog source file remains text; it is never executed
+by this importer.
+
+The upstream text allowlist includes common documentation, programming, and
+configuration extensions, plus =Makefile= and =Dockerfile=. It is not arbitrary
+binary asset packaging. Unsupported resource types are not copied or embedded;
+oversized admitted text resources can still reject conversion even though their
+contents are not included in the output body.
+
+* Non-overwrite behavior and updating an import
+
+The importer writes a UUID-named =.agentprolog-skill-...= temporary file in the
+destination's parent directory, closes it, and creates the final destination
+with a hard link. An existing destination makes this fail instead of being
+truncated. Cleanup attempts to remove the temporary file on either path.
+
+The parent directory must already exist and allow file creation and hard links.
+The command does not create output directories or provide an in-place update
+flag. For an update, choose a new output path, validate and compare it, then
+deliberately update trusted configuration. Do not mistake non-overwrite for a
+complete crash-durability or cross-platform filesystem guarantee; those are not
+established by this implementation. Reusing old persistent session state after
+changing source/configuration identity can produce a configuration mismatch.
+
+* Troubleshooting
+
+| Failure or symptom | Corrective action |
+|--------------------+-------------------|
+| Usage message, exit 2 | Supply exactly two arguments: a source directory and destination file. |
+| =no_skills_found= | Check exact =SKILL.md= capitalization, discovery root, and skipped directories. |
+| =missing_frontmatter= / =unterminated_frontmatter= | Use exact opening/closing =---= lines; prefer the minimal example. |
+| =missing_frontmatter_field(name)= or =(description)= | Supply nonempty scalar fields. |
+| =invalid_skill_name= | Use the Markdown name grammar, not the looser native atom rule. |
+| =duplicate_skill_names(...)= | Make discovered package names unique; directory names do not namespace identities. |
+| =symlink_descendant(...)= / =path_escape(...)= | Put real source files inside the chosen root instead of linking outside it. |
+| =instruction_fingerprint_mismatch(...)= | Stop concurrent edits and retry conversion from a stable source package. |
+| =unsupported_prolog_rlm_metadata(...)= | Use only the implemented JSON schema/keys; do not assume full YAML/extensions. |
+| Destination already exists | Select a new output filename; the importer intentionally refuses overwrite. |
+| Destination creation/link error | Check that the parent exists and permits creation/hard links. |
+| Import succeeds, native load fails | Check native 128-unit/1 MiB file limits and compiler validation. |
+| Explicitly selected import rejected | Check =available:false=, dependencies, capabilities, conflicts, and exact identity. |
+| Relative documentation/script link no longer works | Resources and link targets were not copied; arrange access separately. |
+
+* Sources and related pages
+
+- [[file:../../prolog/agentprolog_import_skill.pl][Two-argument importer CLI]].
+- [[file:../../prolog/agentprolog_skills.pl][Import, provenance, non-overwrite write path, and native validation]].
+- [[file:../../skills/markdown-to-prolog/SKILL.md][Checked-in import-source skill]].
+- [[file:../../test/agentprolog_skills_test.pl][Import provenance and inert native loading regression tests]].
+- [[file:../../flake.nix][Packaged import command and native-skill-import check]].
+- Source-package bounds, frontmatter rules, and confinement are implemented in
+  upstream =prolog/rlm_skill.pl= at the revision pinned by =flake.nix=
+  (=4716ba8aa0bbf3fa1b96d80e8ed8e91d99973c85=); compiler IR behavior lives in
+  upstream =prolog/rlm_prompt_compiler.pl=.
+- [[file:skills.org][Skills]], [[file:packages-and-plugins.org][Packages and plugins]], [[file:Home.org][Wiki home]].

@@ -1,0 +1,122 @@
+:PROPERTIES:
+:ID: 7d776733-016c-463e-8e15-43d9f4eed6d5
+:END:
+#+TITLE: AgentProlog
+#+CREATED: [2026-11-12 Thu 22:08]
+#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: documentation
+#+ROAM_VISIBILITY: private
+#+CENSOR_PROFILE: strict
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:2e1a3144bd761bda3eb28f8c002cf18b51dc388a76c56419342fa2568e9d0ae2; repository target README.org; source links in body
+#+AI_GENERATED: t
+#+AI_TAG: ai_93cce0d11615d204
+#+FILETAGS: :ai:ai_93cce0d11615d204:agentprolog:prolog-runtime:documentation:repository-readme:
+
+#+PROPERTY: header-args :eval never-export
+#+options: toc:2 num:nil
+
+* The agent application on Prolog-RLM
+
+AgentProlog composes a reusable Prolog-RLM runtime into a configurable agent
+application. This repository owns product configuration, coding tools, session
+hosting, scripting clients and presentation adapters. Execution semantics stay
+in Prolog-RLM: there is no second provider engine, prompt compiler, scheduler,
+authority system or effect ledger here.
+
+#+begin_example
+AgentProlog UI / script / integration
+  -> canonical session host and frontend protocol
+  -> trusted Prolog configuration, tools and hooks
+  -> public Prolog-RLM runtime APIs
+#+end_example
+
+* Documentation
+
+The canonical documentation is Org mode throughout.
+
+- [[file:docs/wiki/Home.org][Complete wiki]]
+- [[file:docs/wiki/installation.org][Installation and toolchain]]
+- [[file:docs/wiki/getting-started.org][First session]]
+- [[file:docs/wiki/tutorial-todo-app.org][Build and verify a CRUD todo app]]
+- [[file:docs/wiki/configuration-reference.org][Full Prolog configuration reference]]
+- [[file:docs/wiki/configuration-cookbook.org][Configuration cookbook and runnable examples]]
+- [[file:docs/wiki/scripting.org][Scripting and programmatic use]]
+- [[file:docs/wiki/security-and-approvals.org][Trust, permissions and approvals]]
+- [[file:docs/README.org][Implementation reference map]]
+
+* Quick start
+
+These commands run the current checkout. Installation from a remote branch does
+not make unmerged changes part of an official release.
+
+#+begin_src sh
+nix run .#agentProlog -- --help
+nix run .#agentProlog -- --project /absolute/project --state /absolute/private/session-state
+#+end_src
+
+The terminal client is interactive. An unconfigured session has no granted tools.
+Running a model turn requires an explicitly configured and authorized provider.
+Use a trusted operator Prolog file for grants, packages, agent selection and
+budget policy:
+
+#+begin_src sh
+nix run .#agentProlog -- --project /absolute/project --config /absolute/operator.pl
+#+end_src
+
+Import Markdown skills into inert native Prolog prompt-unit data:
+
+#+begin_src sh
+nix run .#import-skill -- /path/to/skill-package /path/to/native-skill.pl
+#+end_src
+
+* Current capabilities
+
+- Prolog operator, plugin and project configuration; named agent profiles with
+  narrowing capability/budget inheritance.
+- Native Prolog skills, standard Markdown skill import, and explicitly trusted
+  ordinary local SWI-Prolog packages.
+- Confined file read/create/write/modify tools with content preconditions and
+  native per-operation authority. A fixed Node syntax-check tool has no shell.
+- Durable project/configuration-bound sessions, snapshots, correlated commands,
+  approvals, questions, usage, cancellation and conservative restart recovery.
+- A real-model coding acceptance example and independent HTTP CRUD verification.
+- Canonical JavaScript client, interactive terminal UI, DeepSeek Harness bridge
+  and optional Zara runtime profile.
+
+* Guarantees and limits
+
+Trusted executable Prolog is not sandboxed by tool capability policy. File
+confinement is not OS isolation. Skill selection never grants authority. Model
+completion is distinct from independent artifact acceptance. Reported model cost
+is not a provider-enforced monetary reservation.
+
+The small todo target is in-memory; HTTP behavior and HTML presence are tested,
+not a full browser-automation or production-deployment guarantee. Native
+skill/system-prompt projection is currently non-streaming. UI, integration and
+provider-specific gates must be assessed separately rather than inferred from
+one successful demonstration.
+
+The bundled resumable per-tool approval UI supports =direct= mode. Typed-plan
+pending approvals in =rlm= mode are not bridged into that same continuation.
+
+* Development
+
+#+begin_src sh
+nix develop
+nix flake check --print-build-logs
+bash scripts/check.sh /path/to/the/exact/pinned/prolog-rlm
+#+end_src
+
+Read [[file:docs/wiki/development-and-testing.org][the verification guide]] before
+running credential-bearing scripts. Deterministic fixtures, actual native
+execution, live model I/O and recorded artifact verification are different
+evidence classes.
+
+* Ownership
+
+The dependency direction is =agentProlog -> prolog-rlm=. Concrete workflows,
+tools and product UX belong here; generic runtime changes belong upstream.
+See [[file:docs/wiki/architecture.org][architecture]],
+[[file:docs/wiki/integrations.org][integrations]], and the existing
+[[file:docs/adr/0003-prolog-agents-skills-packages-crud.md][architecture decision]].
