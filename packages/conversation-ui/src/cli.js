@@ -23,6 +23,7 @@ Usage: agentProlog [--project DIR] [--state DIR]
 /cancel                   request canonical session cancellation
 /approve ID DECISION      choose an exact runtime-offered approval decision
 /answer ID TEXT           answer a pending runtime question
+/report-bug [TEXT]        start an AI bug-intake interview about a problem you hit
 /help                     show this help
 /quit                     close the sidecar and exit
 
@@ -33,6 +34,18 @@ The configured sidecar owns the session and profile. Choose a different operator
 configured sidecar/state directory to switch workspaces. No tools, provider calls,
 shell commands, or collection are executed by this UI.
 `;
+export const REPORT_BUG_COMMAND = '/report-bug';
+export function reportBugObjective(input = '') {
+  const described = input.trim();
+  const symptom = described
+    ? `The user's initial report: "${described}"`
+    : 'The user typed no description yet; your first question must ask for the first concrete observation.';
+  return [
+    'Bug intake interview for AgentProlog. Collect exactly one structured bug report.',
+    symptom,
+    'Rules: ask the user short clarifying questions one at a time through your available question mechanism, and only about what you still need; never invent facts, never modify files, never run mutation tools, and never claim an issue was filed anywhere. When you have enough information, reply with the final report only, using exactly these headings: Title, Component, Environment, Steps to reproduce, Expected, Actual, Severity, Suspected cause, Missing information. If this configuration gives you no way to ask questions, produce the report from what you have and record the gaps under Missing information.'
+  ].join('\n');
+}
 export async function main(argv = process.argv.slice(2)) {
   if (argv.includes('--help')) { process.stdout.write(HELP); return; }
   let command = process.env.AGENTPROLOG_SIDECAR;
@@ -93,6 +106,7 @@ export async function main(argv = process.argv.slice(2)) {
       else if (op === '/cancel') await client.command('session.cancel');
       else if (op === '/approve') await client.command('approval.decide', { approval_id: words[0], decision: words[1] });
       else if (op === '/answer') await client.command('question.answer', { question_id: words[0], answer: words.slice(1).join(' ') });
+      else if (op === REPORT_BUG_COMMAND) await client.command('session.turn', { objective: reportBugObjective(line.trim().slice(REPORT_BUG_COMMAND.length)) });
       else if (op?.startsWith('/')) throw new Error('Unknown command. Use /help.');
       else if (op) await client.command('session.turn', { objective: line });
     } catch (error) { process.stderr.write(`${safe(error.code ?? 'error')}: ${safe(error.message)}\n`); }

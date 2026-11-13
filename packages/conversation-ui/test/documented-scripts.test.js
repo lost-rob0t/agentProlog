@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, readFile, rm, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { setTimeout as delay } from 'node:timers/promises';
+import { reportBugObjective } from '../src/cli.js';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const script = name => join(root, 'examples/scripts', name);
@@ -55,6 +57,7 @@ createInterface({input:process.stdin}).on('line', line => {
    result(f); event('run_finished',{outcome:{status:'cancelled'}}); return;
  }
  if (f.command !== 'session.turn') throw Error('Unexpected command');
+ if (scenario === 'ack-only') { result(f); return; }
  if (scenario === 'rejected') { send({protocol:f.protocol,kind:'error',session_id:snapshot.session_id,
    request_id:f.request_id,code:'permission_denied',message:'rejected by fixture'}); return; }
  event('run_started',{run_id:'new',task:f.payload.objective});
@@ -187,4 +190,47 @@ appendFileSync(${JSON.stringify(w.log)},JSON.stringify(process.argv.slice(2))+'\
   assert.match(loader, /load_skill_units\(\[Path\], \[_\|_\]\)/);
   const again = await run('bash', args, w.directory); assert.equal(again.code, 2);
   assert.equal(await readFile(imported, 'utf8'), 'inert fixture');
+});
+
+async function driveReportBug(t, line) {
+  const w = await workspace(t), host = await mockHost(w);
+  const cliJs = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const child = spawn(process.execPath, [cliJs, '--sidecar', process.execPath,
+    ...[host, 'ack-only', w.log].flatMap(arg => ['--sidecar-arg', arg])],
+  { cwd: w.directory, env: cleanEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+  t.after(() => { if (child.exitCode === null) child.kill('SIGKILL'); });
+  let stdout = '';
+  child.stdout.on('data', chunk => { stdout += chunk; });
+  const exited = new Promise(resolve => child.once('exit', code => resolve(code)));
+  for (let i = 0; i < 150 && !stdout.includes('agentprolog>'); i++) await delay(20);
+  assert.ok(stdout.includes('agentprolog>'), 'CLI reached its prompt');
+  assert.match(stdout, /\/report-bug \[TEXT\]/);
+  child.stdin.write(`${line}\n`);
+  let turns = [];
+  for (let i = 0; i < 150; i++) {
+    turns = (await readFile(w.log, 'utf8').catch(() => '')).split('\n')
+      .filter(Boolean).map(JSON.parse).filter(f => f.command === 'session.turn');
+    if (turns.length) break;
+    await delay(20);
+  }
+  child.stdin.end('/quit\n');
+  assert.equal(await exited, 0);
+  assert.equal(turns.length, 1);
+  const frames = (await readFile(w.log, 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.ok(frames.every(f => !['approval.decide', 'question.answer', 'session.resume'].includes(f.command)));
+  return turns[0].payload.objective;
+}
+
+test('CLI /report-bug submits the AI intake objective with the typed report', async t => {
+  const objective = await driveReportBug(t, '/report-bug terminal loses colors after reconnect');
+  assert.equal(objective, reportBugObjective('terminal loses colors after reconnect'));
+  assert.match(objective, /terminal loses colors after reconnect/);
+  assert.match(objective, /Bug intake interview/);
+  assert.doesNotMatch(objective, /no description yet/);
+});
+
+test('CLI bare /report-bug starts intake without inventing a symptom', async t => {
+  const objective = await driveReportBug(t, '/report-bug');
+  assert.equal(objective, reportBugObjective(''));
+  assert.match(objective, /typed no description yet/);
 });

@@ -11,13 +11,12 @@ permissions:
 jobs:
   deterministic-and-packaged:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22.19.0'
-      - uses: https://github.com/DeterminateSystems/nix-installer-action@main
       - name: Read existing exact runtime dependency
         id: runtime
         run: |
@@ -39,14 +38,21 @@ jobs:
         run: |
           npm install --prefix "$RUNNER_TEMP/agentprolog-install" ./packages/conversation-ui
           "$RUNNER_TEMP/agentprolog-install/node_modules/.bin/agentProlog" --help | grep -F 'canonical conversation UI'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: deterministic-native-evidence
+          path: deterministic-evidence.txt
+
+  nix-packages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: https://github.com/DeterminateSystems/nix-installer-action@main
       - name: Pinned Nix package and documentation checks
         run: nix flake check --print-build-logs
       - name: Build and run default package
         run: |
           nix build .#agentProlog --print-build-logs
           nix run .#agentProlog -- --help | grep -F 'canonical conversation UI'
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: deterministic-native-evidence
-          path: deterministic-evidence.txt

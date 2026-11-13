@@ -1,17 +1,17 @@
 :PROPERTIES:
-:ID: 7faab70b-9753-41ff-8033-c4ec8901b1e1
+:ID: 7e84f461-2d52-4a98-9b40-758f9f0623f4
 :END:
 #+TITLE: Sessions and recovery
-#+CREATED: [2026-11-12 Thu 22:08]
-#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+CREATED: [2026-11-12 Thu 23:11]
+#+LAST_MODIFIED: [2026-11-12 Thu 23:11]
 #+ROAM_SCHEMA: org-roam-meta/v1
 #+ROAM_KIND: documentation
 #+ROAM_VISIBILITY: private
 #+CENSOR_PROFILE: strict
-#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:1509dd23ceb44803ab6cf1ff764c1c8aada17753b2d23d58d669b2e52136db45; repository target docs/wiki/sessions-and-recovery.org; source links in body
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:a43e1beb9adf6ded05d3513bf47d574178b7e56883cbb834967546746ecc9f56; repository target docs/wiki/sessions-and-recovery.org; source links in body
 #+AI_GENERATED: t
-#+AI_TAG: ai_1bc452f71a3e6273
-#+FILETAGS: :ai:ai_1bc452f71a3e6273:agentprolog:prolog-runtime:documentation:sessions-and-recovery:
+#+AI_TAG: ai_26e108d1820ed1bd
+#+FILETAGS: :ai:ai_26e108d1820ed1bd:agentprolog:prolog-runtime:documentation:sessions-and-recovery:
 
 #+PROPERTY: header-args :eval never-export
 #+description: Project-scoped sidecar ownership, durable checkpoints, approvals and honest reconnect behavior.
@@ -99,6 +99,7 @@ Sources: [[file:../../prolog/agentprolog_session.pl][serve/initialize/config_bin
 | =/select= | =session.select= does the same; no arbitrary session selector exists here |
 | =/resume= | =session.resume= starts a *new run* for the last stored objective |
 | =/answer ID TEXT= | Answers an actual pending question and starts a run with the answer as objective |
+| =/report-bug [TEXT]= | Submits one bug-intake interview objective; its questions are ordinary pending questions |
 | =/cancel= | Requests canonical cancellation; acknowledgement is not final cleanup |
 | =/reconnect= | Closes/restarts the configured sidecar and obtains its current canonical checkpoint |
 | =/inspect= | Renders the current local projection; stale if disconnected |

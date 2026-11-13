@@ -1,17 +1,17 @@
 :PROPERTIES:
-:ID: a81872e8-38b8-4e3a-8295-37bae597aab1
+:ID: 8dcafb79-49c8-4350-9753-82ee75618549
 :END:
 #+TITLE: Getting started with AgentProlog
-#+CREATED: [2026-11-12 Thu 22:08]
-#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+CREATED: [2026-11-12 Thu 23:11]
+#+LAST_MODIFIED: [2026-11-12 Thu 23:11]
 #+ROAM_SCHEMA: org-roam-meta/v1
 #+ROAM_KIND: documentation
 #+ROAM_VISIBILITY: private
 #+CENSOR_PROFILE: strict
-#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:76e63fd6868d6b7e3735e24468e288fef04b6c8bf58b8cf7fcd332d0f5cb5a85; repository target docs/wiki/getting-started.org; source links in body
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:0615e7c8c6c2842eff27b782ae671f2517683b9691cacbddcb99ba765744f650; repository target docs/wiki/getting-started.org; source links in body
 #+AI_GENERATED: t
-#+AI_TAG: ai_3a6d3b9a44335400
-#+FILETAGS: :ai:ai_3a6d3b9a44335400:agentprolog:prolog-runtime:documentation:getting-started:
+#+AI_TAG: ai_8ddd004e197c4760
+#+FILETAGS: :ai:ai_8ddd004e197c4760:agentprolog:prolog-runtime:documentation:getting-started:
 
 #+PROPERTY: header-args :eval never-export
 
@@ -142,6 +142,7 @@ If you do not have authorized provider access, stop after configuration inspecti
 | =/create= / =/select= | Initialize/select or refresh the configured session; not an interactive workspace picker |
 | =/answer ID TEXT= | Answer the exact pending question |
 | =/approve ID DECISION= | Submit an offered decision for an exact pending approval |
+| =/report-bug [TEXT]= | Start one AI bug-intake interview turn; answer its questions with =/answer= |
 | =/cancel= | Request cancellation of the current run |
 | =/reconnect= | Restart the connection/sidecar and obtain its checkpoint |
 | =/resume= | Explicitly start the previous objective as a new run, potentially making new calls |

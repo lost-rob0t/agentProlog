@@ -1,17 +1,17 @@
 :PROPERTIES:
-:ID: 9628b99c-6326-413e-b64e-c11cf142fefc
+:ID: f627b9df-cf14-4e8e-81b7-d1f48f1572ef
 :END:
 #+TITLE: API reference
-#+CREATED: [2026-11-12 Thu 22:08]
-#+LAST_MODIFIED: [2026-11-12 Thu 22:08]
+#+CREATED: [2026-11-12 Thu 23:11]
+#+LAST_MODIFIED: [2026-11-12 Thu 23:11]
 #+ROAM_SCHEMA: org-roam-meta/v1
 #+ROAM_KIND: documentation
 #+ROAM_VISIBILITY: private
 #+CENSOR_PROFILE: strict
-#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:634ad7f0f9ac2fa294436d8f9983e22572cde04f74781ba79fb38fcb8190447e; repository target docs/wiki/api-reference.org; source links in body
+#+SOURCE: AgentProlog codebase 0512eb8d65db85af6e097bc86def9fcd15fd1245; documentation worktree; OpenCode ses_e2d88a7fdffe7xMwHvay2rOGqk; draft sha256:0f1c46a0450dd07ff47bdcc79627a41b902e906e7a2036f37bf9ce52832f1809; repository target docs/wiki/api-reference.org; source links in body
 #+AI_GENERATED: t
-#+AI_TAG: ai_8794e6a3daa04090
-#+FILETAGS: :ai:ai_8794e6a3daa04090:agentprolog:prolog-runtime:documentation:api-reference:
+#+AI_TAG: ai_b14df4ff1802f6d4
+#+FILETAGS: :ai:ai_b14df4ff1802f6d4:agentprolog:prolog-runtime:documentation:api-reference:
 
 #+PROPERTY: header-args :eval never-export
 #+description: Local Prolog exports, callback ABIs, canonical client, wire commands and CLI.
@@ -275,9 +275,10 @@ Direct host argv is =agentprolog-session STATE_DIRECTORY PROJECT [options]=. Its
 | =/cancel= | Request =session.cancel= |
 | =/approve ID DECISION= | Send exact offered approval decision; never guess a persistent grant |
 | =/answer ID TEXT= | Answer pending question |
+| =/report-bug [TEXT]= | Submit one bug-intake interview objective; answers still go through =/answer= |
 | =/help= | Print help |
 | =/quit= | Close sidecar and exit |
 
-Nonempty ordinary text submits =session.turn {objective}=. Blank CLI input does nothing; programmatic clients can send a blank objective to request a question. Unknown slash commands fail. There is no =/model=, =/workspace=, =/spawn= or =/publish= UI command.
+Nonempty ordinary text submits =session.turn {objective}=. Blank CLI input does nothing; programmatic clients can send a blank objective to request a question. Unknown slash commands fail. There is no =/model=, =/workspace=, =/spawn= or =/publish= UI command. =/report-bug [TEXT]= is sugar over one =session.turn=: it submits a fixed bug-intake objective embedding your text (or asking for the first symptom when empty). It needs a model-capable session, never answers its own questions, never mutates files, and does not file anything anywhere; you still answer the interview through =/answer=.
 
 For the separate Harness and Zara APIs, see [[file:integrations.org][Integrations]]. For evidence scope and test commands, see [[file:development-and-testing.org][Development and testing]].
