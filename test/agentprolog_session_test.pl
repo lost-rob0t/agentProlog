@@ -94,4 +94,78 @@ test(failed_run_retains_actual_usage) :-
        assertion(S.view.usage.cost_usd=:=0.01),assertion(S.view.usage.total_tokens==20)),
       delete_directory_and_contents(Directory)).
 
+history_model(Request, Outcome) :-
+    (member(M,Request.messages),M.role==user,M.content=="follow up"
+    -> assertion((member(U,Request.messages),U.role==user,U.content=="FIRST_TURN_MARKER")),
+       assertion((member(A,Request.messages),A.role==assistant,A.content=="Synthetic hello"))
+    ; true), model(Request,Outcome).
+
+history_config(C) :-
+    agentprolog_config:default_configuration(D), config(Base),
+    put_dict(Base,D,C0),
+    put_dict(_{budget:D.budget,runtime_options:[history_depth(2),provider(provider(openai_compatible,[])),
+      provider_name(openai_compatible),model_handler(plunit_agentprolog_session:history_model)]},C0,C).
+
+test(two_native_turns_project_history_after_checkpoint_restart) :-
+    tmp_file(agentprolog_history,Directory),
+    setup_call_cleanup(make_directory(Directory),
+      (history_config(C),agentprolog_session:initialize(Directory,C),
+       agentprolog_session:update(_{phase:"running",run_id:"first",objective:"FIRST_TURN_MARKER"}),
+       agentprolog_session:work("first","FIRST_TURN_MARKER",done),
+       agentprolog_session:checkpoint(First),assertion(First.phase=="complete"),
+       assertion(First.history==[turn{user:"FIRST_TURN_MARKER",assistant:"Synthetic hello"}]),
+       agentprolog_session:initialize(Directory,C),
+       agentprolog_session:update(_{phase:"running",run_id:"second",objective:"follow up"}),
+       agentprolog_session:work("second","follow up",done),
+       agentprolog_session:checkpoint(Second),assertion(Second.phase=="complete"),
+       assertion(length(Second.history,2))),
+      delete_directory_and_contents(Directory)).
+
+test(private_memory_excluded_from_record_and_legacy_projection) :-
+ history_config(C),Old=[turn{user:"/remember PRIVATE_WRITE",assistant:"saved"},
+ turn{user:"/remember\u00a0",assistant:"PRIVATE_READ"}],
+ agentprolog_history:history_record(C,_{objective:"/remember NEW_PRIVATE",history:Old},"saved",H),assertion(H==[]),
+ agentprolog_history:history_messages(C,Old,Messages),assertion(Messages==[]),
+ agentprolog_history:history_record(C,_{objective:"public",history:Old},"public answer",Public),
+ assertion(Public==[turn{user:"public",assistant:"public answer"}]).
+
+test(history_disabled_by_default) :-
+    config(C),agentprolog_history:history_messages(C,[turn{user:"SECRET",assistant:"answer"}],M),
+    assertion(M==[]),agentprolog_history:history_record(C,_{objective:"user"},"answer",H),assertion(H==[]).
+
+test(history_depth_bounds_and_binding) :-
+    history_config(C),agentprolog_session:config_binding(C,B1),
+    select(history_depth(2),C.runtime_options,history_depth(1),Opts),
+    put_dict(runtime_options,C,Opts,C2),agentprolog_session:config_binding(C2,B2),assertion(B1\==B2),
+    agentprolog_history:history_record(C2,_{objective:"new",history:[turn{user:"old",assistant:"answer"}]},"reply",H),
+    assertion(H==[turn{user:"new",assistant:"reply"}]),
+    assertion(\+agentprolog_config:valid_runtime_options([history_depth(33)])).
+
+test(history_budget_drops_whole_pairs_without_promoting_roles) :-
+    history_config(C),put_dict(max_total_tokens,C.budget,4,B),put_dict(budget,C,B,Small),
+    agentprolog_history:history_messages(Small,[turn{user:"a longer question",assistant:"a longer answer"}],M),
+    assertion(M==[]).
+
+test(failed_run_does_not_enter_completed_history) :-
+    tmp_file(agentprolog_history_failed,Directory),
+    setup_call_cleanup(make_directory(Directory),
+      (history_config(C),agentprolog_session:initialize(Directory,C),
+       agentprolog_session:update(_{phase:"running",run_id:"bad",objective:"not evidence"}),
+       agentprolog_session:finish(_{status:"failed"}),agentprolog_session:checkpoint(S),
+       assertion(\+get_dict(history,S,_))),delete_directory_and_contents(Directory)).
+
+test(restored_history_rejects_injected_fields,[throws(error(invalid_session_history,_))]) :-
+    history_config(C),agentprolog_history:history_validate(C,[_{user:"x",assistant:"y",role:system}]).
+
+test(rlm_mode_receives_same_native_history_projection) :-
+    history_config(Base),
+    put_dict(_{mode:rlm,capabilities:[model(openai_compatible)],
+      history:[turn{user:"FIRST_TURN_MARKER",assistant:"Synthetic hello"}],
+      runtime_options:[history_depth(2),provider(provider(openai_compatible,[])),
+        provider_name(openai_compatible),planner_handler(plunit_agentprolog_session:history_planner)]},Base,C),
+    agentprolog_session:native_execute(C,"follow up","history-rlm",ok(_)).
+history_planner(Request,Outcome) :-
+    assertion(memberchk(message{role:user,content:"FIRST_TURN_MARKER"},Request.messages)),
+    rlm_model(Request,Outcome).
+
 :- end_tests(agentprolog_session).

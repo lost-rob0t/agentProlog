@@ -48,7 +48,7 @@ let seq = 0;
 const event = (event_type,payload) => send({protocol:snapshot.protocol,session_id:snapshot.session_id,
  kind:'event',seq:++seq,event_id:'event_'+seq,event_type,payload});
 const result = f => send({protocol:f.protocol,kind:'result',session_id:snapshot.session_id,
- request_id:f.request_id,status:'ok',payload:{accepted:true}});
+ request_id:f.request_id,status:'ok',payload:{accepted:true,...(scenario==='image'?{capabilities:['image_input'],profile:'test-image-provider'}:{})}});
 createInterface({input:process.stdin}).on('line', line => {
  const f = JSON.parse(line); appendFileSync(log, JSON.stringify(f)+'\\n');
  if (f.kind === 'negotiate') { if (scenario === 'silence') return; result(f); send(snapshot); return; }
@@ -65,7 +65,7 @@ createInterface({input:process.stdin}).on('line', line => {
  if (scenario === 'rejected') { send({protocol:f.protocol,kind:'error',session_id:snapshot.session_id,
    request_id:f.request_id,code:'permission_denied',message:'rejected by fixture'}); return; }
  event('run_started',{run_id:'new',task:f.payload.objective});
- if (scenario === 'blocked') event('approval_required',{approval_id:'approval',choices:['allow_once','deny']});
+ if (scenario === 'blocked') event('approval_required',{approval_id:'approval',choices:['allow_once','deny'],diff:{target:'APPROVAL_TARGET.txt',old:'before',new:'after'}});
  else if (scenario === 'question') event('question_required',{question_id:'question',prompt:'Choose',choices:['a','b']});
  else if (scenario === 'fault') { console.log('{malformed'); return; }
  else if (scenario === 'complete') event('run_finished',{outcome:{status:'complete'}});
@@ -247,11 +247,11 @@ async function frames(log) {
   return (await readFile(log, 'utf8').catch(() => '')).trim().split('\n')
     .filter(Boolean).map(JSON.parse);
 }
-async function driveCli(t, scenario, steps) {
+async function driveCli(t, scenario, steps, flags=[]) {
   const w = await workspace(t), host = await mockHost(w);
   const cliJs = fileURLToPath(new URL('../src/cli.js', import.meta.url));
   const child = spawn(process.execPath, [cliJs, '--sidecar', process.execPath,
-    ...[host, scenario, w.log].flatMap(arg => ['--sidecar-arg', arg])],
+    ...[host, scenario, w.log].flatMap(arg => ['--sidecar-arg', arg]), ...flags],
   { cwd: w.directory, env: cleanEnv, stdio: ['pipe', 'pipe', 'pipe'] });
   t.after(() => { if (child.exitCode === null) child.kill('SIGKILL'); });
   let stdout = '', stderr = '';
@@ -321,4 +321,84 @@ test('CLI bare numeric input outside menus stays an ordinary objective', async t
   assert.equal(run.code, 0);
   const turns = (await run.frames()).filter(f => f.command === 'session.turn');
   assert.deepEqual(turns.map(f => f.payload), [{ objective: '42' }]);
+});
+
+test('CLI /ask submits exact expert question, not an LLM-generated routing prompt', async t => {
+  assert.equal(await driveReportBug(t,'/ask echo what changed?'),'/ask echo what changed?');
+});
+
+test('CLI /ask preserves repeated and trailing spaces in literal questions', async t => {
+  const command='/ask echo   x  = "a  b".  ';
+  assert.equal(await driveReportBug(t,command),command);
+});
+
+for (const command of ['/next','/handoff']) test(`CLI ${command} submits native workflow command`, async t => {
+  assert.equal(await driveReportBug(t,command),command);
+});
+
+test('CLI /remember preserves literal note text', async t => {
+  const command='/remember  :- halt.  ';
+  assert.equal(await driveReportBug(t,command),command);
+});
+
+test('CLI opt-in notifications report live canonical completion without objective content', async t => {
+  const run=await driveCli(t,'complete',[
+    {send:'PRIVATE_OBJECTIVE',stderr:/\[AgentProlog\] Run completed\./}
+  ],['--notify','text','--notify-on','complete']);
+  assert.equal(run.code,0);assert.match(run.stderr(),/Run completed/);
+  assert.doesNotMatch(run.stderr(),/PRIVATE_OBJECTIVE/);
+});
+test('CLI notifications are disabled by default', async t => {
+  const run=await driveCli(t,'complete',[{send:'go',stdout:/Run outcome: complete/}]);
+  assert.equal(run.code,0);assert.doesNotMatch(run.stderr(),/\[AgentProlog\]/);
+});
+
+for(const command of ['/army','/swarm']) test(`CLI ${command} preserves explicit profile delegation`,async t=>{
+ const text=`${command} reader,reviewer  explain  this`;
+ assert.equal(await driveReportBug(t,text),text);
+});
+
+test('CLI /rsi preserves explicit evaluation name',async t=>{
+ assert.equal(await driveReportBug(t,'/rsi echo'),'/rsi echo');
+});
+
+test('CLI /sleep preserves native preview command',async t=>{
+ assert.equal(await driveReportBug(t,'/sleep'),'/sleep');
+});
+
+test('CLI /rsi-context preserves native experiment name',async t=>{
+ assert.equal(await driveReportBug(t,'/rsi-context demo'),'/rsi-context demo');
+});
+
+test('CLI /learn preserves named finite experiment',async t=>{
+ assert.equal(await driveReportBug(t,'/learn demo'),'/learn demo');
+});
+
+test('CLI army task JSON preserves exact assignments',async t=>{
+ const command='/army tasks [{"id":"one","profile":"reader","question":"  literal  question"}]';
+ assert.equal(await driveReportBug(t,command),command);
+});
+
+test('CLI explicit approval first exposes exact details and requires a later choice',async t=>{
+ const run=await driveCli(t,'blocked',[
+ {send:'go',logHas:f=>f.command==='session.turn'},
+ {send:'/approve approval allow_once',stdout:/no decision sent yet/},
+ {send:'/back'},
+ ]);
+ assert.match(run.stdout(),/APPROVAL_TARGET.txt/);assert.match(run.stdout(),/before/);assert.match(run.stdout(),/after/);
+ assert.ok(!(await run.frames()).some(f=>f.command==='approval.decide'));
+});
+
+test('CLI selection and discard send no image or turn',async t=>{
+ const dir=await mkdtemp(join(tmpdir(),'selected-image-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const path=join(dir,'one.png');await writeFile(path,Buffer.from('iVBORw0KGgo=','base64'));
+ const run=await driveCli(t,'image',[{send:`/image ${path}`,stdout:/Not sent/},{send:'/image-clear',stdout:/discarded/}]);
+ assert.ok(!(await run.frames()).some(f=>f.command==='session.turn'));
+});
+test('CLI image transmission requires explicit send-image question',async t=>{
+ const dir=await mkdtemp(join(tmpdir(),'send-image-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const path=join(dir,'one.png');await writeFile(path,Buffer.from('iVBORw0KGgo=','base64'));
+ const run=await driveCli(t,'image',[{send:`/image ${path}`,stdout:/Not sent/},{send:'/send-image Describe this',logHas:f=>f.command==='session.turn'}]);
+ const turns=(await run.frames()).filter(f=>f.command==='session.turn');assert.equal(turns.length,1);
+ assert.deepEqual(turns[0].payload,{objective:'Describe this',images:[{name:'one.png',mime:'image/png',data:'iVBORw0KGgo='}]});
 });

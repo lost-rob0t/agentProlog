@@ -400,3 +400,319 @@ swipl -q -p "library=$PROLOG_RLM_SOURCE/prolog" \
 The suite loads every table entry through =load_configuration/3=, checks denial without grants, source-relative resolution under a changed working directory, explicit tool roots, operator distrust of discovered project code, native skill/instruction projection, provider credential references, budget rejection, agent narrowing, bounded artifact review and local-pack consumption. A Node syntax-check test uses JavaScript that would throw if executed; =--check= succeeds without running it.
 
 These checks do not establish live provider availability, billing correctness, arbitrary-plugin safety or application-level behavior. Run the repository's wider deterministic gate separately; a bounded, authorized live-model acceptance run is a separate kind of evidence.
+
+* Native private task journal and existing .prolog memory
+
+The new =agentprolog_workflow= adapter composes the public
+=library(rlm_task_workflow)= API. It does not integrate OpenCode. Existing
+=.prolog/kb/=, =.prolog/handoff.pl= and =.prolog/facts.kb= remain their original
+formats. =project_memory_read/3= returns bounded text and its content hash;
+Prolog directives/rules in those files are not executed or silently imported.
+
+Trusted host setup explicitly chooses a private writable state directory outside
+tracked source and initializes it once:
+
+#+begin_src prolog
+use_module('/absolute/agentProlog/prolog/agentprolog_workflow').
+workflow_initialize('/absolute/project', source_digest, '/private/run-state').
+workflow_tools('/absolute/project', '/private/run-state', Tools).
+#+end_src
+
+=Tools= is the ordinary =tool(Schema, Handler)= list accepted by trusted
+=agentprolog_config/1=. Registration grants nothing. Operator policy must grant
+=tool(workflow_snapshot)=, =tool(workflow_add)= and/or
+=tool(workflow_transition)= as needed. Writes use the canonical approval/effect
+boundary and compare-and-swap the exact checkpoint content reviewed at preflight.
+No executable text, shell command, arbitrary path, completion flag, or claimed
+evidence is accepted by these model-facing tools.
+
+The private =task-workflow.pl= file is read as one data term, never consulted.
+Tasks retain dependencies, reasons and history. A model can select pending,
+active, blocked or cancelled, but cannot mark done. Completion is host-only:
+=workflow_bind(StateRoot, Id, FrozenSpec)= followed by
+=workflow_verify(StateRoot, Id, Observations, AssertionRegistry, Verification)=.
+Both APIs are trusted host operations, not model tools. Use real collectors and
+source revision fingerprints. Call =workflow_refresh(StateRoot, NewRevision)=
+when project state changes; stale specs/evidence must be rebound/recollected.
+The adapter does not discover revisions itself. State is not a cryptographically
+signed receipt; protect the directory from untrusted writers.
+
+No TODO file is written into the repository. This is a native journal/read slice,
+not a migration of old verification journals, automatic diagnostic reasoning,
+knowledge promotion, or complete replacement for the existing project-memory
+skills. Workspace limits apply (64 KiB journal, no symlink/traversal paths).
+Archival/rotation is explicit. Concurrent processes need operator coordination;
+compare-and-swap detects sequential stale edits but is not an OS-wide lock.
+
+The flake pins the matching runtime task-workflow and approval-continuation APIs.
+To reproduce the tests against a checkout of that exact revision, use:
+
+#+begin_src sh
+swipl -q -p library="$PROLOG_RLM_SOURCE/prolog" \
+  -s test/agentprolog_workflow_test.pl -g run_tests -t halt
+#+end_src
+
+* Native symbolic expert questions
+
+=/ask NAME QUESTION= dispatches a configured provider-free expert directly,
+without asking a model to choose a tool. The native command recognizes only
+expert tools made by =agentprolog_experts:expert_question_tool/2=. Other tools,
+arbitrary Prolog goals and unknown experts are rejected, never guessed by an LLM.
+
+A trusted plugin can export =agentprolog_config/1= and use this pattern:
+
+#+begin_src prolog
+:- use_module(library(agentprolog_experts)).
+agentprolog_config(_{tools:[Tool],capabilities:[tool(expert_echo)]}) :-
+    Contract=expert_contract{
+      id:echo,version:1,accepts:[ask/1],produces:value,specialties:[example],
+      requires:[],observations:[],effects:[],fallback:none,child_policy:never,
+      limits:expert_limits{},handler:my_plugin:echo},
+    expert_question_tool(Contract,Tool).
+echo(ask(Question),_,succeeded(Question,[example_evidence])).
+#+end_src
+
+The operator must grant =--allow-tool expert_echo=. =/ask echo hello= sends inert
+text to the registered =ask/1= handler. Its result, evidence and expert usage are
+printed, not rewritten by another model. The helper uses the upstream expert
+registry and =expert_tool_register/5= projection. The outer configured-tool gate
+checks grants and required capabilities; the inner projection preserves upstream
+expert validation, inference, time and result bounds. Neither question text nor
+model output can select handler code or expand capabilities.
+
+The session tool-call/output/time budgets and cancellation token still apply.
+Registry lifetimes are per invocation; this slice has no persistent expert memory
+or nested fleet. Successful questions may enter opt-in completed-turn history.
+This first command supports symbolic read-only experts only: effectful experts
+and model fallbacks are rejected at configuration. Actionful and LLM-invoking
+expert variants remain follow-up work, not silently executed without approval.
+
+Expert status is distinct from successful transport. Only =succeeded= completes
+an =/ask= run and enters completed-turn history; =failed=, =unknown=, =blocked=,
+=unsupported=, =cancelled= and =error= retain their explicit status/report in tool
+output and finish the run unsuccessfully. Question text after the single separator
+following NAME is preserved, including repeated spaces, newlines and trailing
+spaces. No Prolog term parser is applied to that text.
+
+* Native journal commands: /next and /handoff
+
+With =workflow_tools(Project, StateRoot, Tools)= explicitly configured, grant
+=--allow-tool workflow_next --allow-tool workflow_handoff= and include those two
+capabilities in the trusted profile. Neither command calls a model.
+
+- =/next= reports pending tasks whose dependencies are completed, using canonical
+  =task_workflow_ready/2=. It does NOT start a task, claim it atomically or execute
+  work. Empty readiness is reported as an empty list, not a finished project.
+- =/handoff= reports the journal's project, source-state reference, revision,
+  task statuses/dependencies/reasons, ready IDs, and whether specs/verification
+  are present. It does NOT write =.prolog/handoff.pl= or publish a document.
+  Presence of verification is not a new independent verification run.
+
+Both commands are read-only canonical tools, check the configured project, and
+revalidate the checkpoint hash between preflight and read. A stale read fails
+rather than publishing a report paired with a newer hash. The source-state
+reference is the journal's recorded revision, not an automatic live Git scan.
+Capability, output, time and cancellation bounds still apply. Missing config,
+missing grants and unexpected operands fail without model fallback.
+
+These are intentionally scoped first versions. =/remember= and =/learn=, mutable
+handoff writing, automatic task execution and task claiming remain separate work
+requiring appropriate write approvals. Existing =.prolog= memory is not consulted
+as executable code, and these commands add no operator TODOs to the repository.
+
+* /remember: approved private notes, not learned facts
+
+A trusted plugin may call =memory_tools(Project, PrivateStateDirectory, Tools)=
+from =agentprolog_memory= and include =tool(memory_remember)= in its capabilities.
+The operator grants =--allow-tool memory_remember=. The private directory must
+already exist and should be outside the source repository.
+
+=/remember TEXT= requests native write approval for the exact append to
+=memory-notes.json=. No write happens until approval. Denial/cancellation and
+process restart do not resume or retry it. The original live run, cancellation
+token and deadline guard execution at the authority continuation, and its
+resolution remains retained while the command is suspended. The file is created
+or compare-and-swap replaced through the existing confined workspace tool.
+
+Every entry is explicitly =unverified_note=. Text is preserved and never
+consulted, executed, or promoted to a Prolog predicate or verified claim. This
+includes notes submitted by a model through the configured tool: recording does
+not imply user authorship or truth. Existing =.prolog/kb/= and =facts.kb= are not
+modified. Notes are project-bound; malformed or cross-project stores fail closed.
+
+Limits: 128 entries, 4,096 characters per note, inherited 64-KiB file limit, and
+at least 256 output-budget bytes for the receipt. Storage is a private bounded
+append-only note list, not an epistemic KB, training system, retrieval index or
+synced memory. There is no automatic context injection or /learn implementation.
+The whole-command budget includes approval waiting. Expired approval does not
+permit a late write. The existing workspace path-race limitations still apply.
+
+* Local configurable notifications
+
+CLI flags are local UI settings, not runtime capabilities:
+
+#+begin_src shell
+agentProlog --notify text --notify-on approval,question,failed
+agentProlog --notify bell --notify-on complete,failed
+#+end_src
+
+=--notify= accepts =off= (default), =text= (canned stderr notice), or =bell=
+(a terminal bell only when stderr is a TTY). =--notify-on= selects any comma-
+separated subset of =approval,question,complete,failed,cancelled=; the default is
+all five. Invalid values fail before connecting to the sidecar. Bell behavior
+still depends on terminal settings; redirected output never receives bell bytes.
+
+Only validated live canonical events trigger notices. Initial/reconnect snapshots
+are silent, and duplicate event delivery is rejected by the existing protocol.
+A bounded per-process cache suppresses repeat notices for the same run/item.
+Notices contain no objective, note text, tool arguments, question, or approval
+diff. A completion notice says external results may still require verification.
+
+There are no notification subscriptions, desktop permission prompts, shell hooks,
+webhooks, third-party messaging, background persistence or new execution authority.
+Close the CLI to stop notifications. These settings also work with an explicitly
+configured external sidecar and are never forwarded as sidecar arguments.
+
+* Approval-gated Node test runner
+
+The trusted host can register a fixed test suite, not a model-controlled shell:
+
+#+begin_src prolog
+:- use_module(library(agentprolog_test_runner)).
+% Root is the already-authorized absolute project root; Node is an absolute
+% operator-selected Node executable. Do not derive either from model output.
+configured_test_tool(Root, Node, Tool) :-
+    node_test_tool(Root, Node, ["test/app.test.mjs"],
+                  _{timeout:5.0, output_bytes:16384,
+                    evidence_files:["src/app.mjs"]}, Tool).
+#+end_src
+
+Add the tool to trusted configuration and explicitly grant
+=tool(workspace_test)=. The model can invoke only =workspace_test({})=; its argv
+cannot select another program, test file, flags or shell. Every invocation retains
+=effect:process= and uses native approval. Approval details show the exact binary,
+fixed =--test --test-reporter=tap= argv, working directory, timeout, output cap and
+hashes of the binary plus declared files. Declared file/binary hashes are checked
+again before launch. Changes to declared files during execution mark the result
+=stale_evidence=, even when the observed exit code is zero.
+
+The result is an ordinary opaque native tool value, readable with =context_peek=:
+=status=, observed =exit_code=, bounded =output=, =truncated=, declared-file evidence,
+=evidence_current=, binary SHA-256 and optional TAP =counts=. Missing/ambiguous
+counts are omitted, not guessed. Exit zero and printed counts are observations,
+not proof that a malicious test checked the intended behavior. Do not convert
+model prose into a verification receipt. =workspace_check= remains syntax-only.
+
+This first implementation supports fixed Node test files on Unix. It clears the
+environment, uses an absolute executable and no shell, combines bounded stdout/
+stderr, applies a deadline, and kills the process group on normal cleanup, output
+limit, timeout or cancellation. A timeout/output limit uses exit_code -1 because
+there was no observed normal exit code. Partial output on timeout can omit the
+last incomplete read chunk.
+
+IMPORTANT: tests execute arbitrary project code with the host's OS permissions.
+This is NOT filesystem/network isolation. Declared hashes do not cover undeclared
+imports, dependencies, concurrently replaced paths or all program behavior.
+A hostile child can escape its process group; a hard sidecar/OS crash can bypass
+cleanup. Run only trusted tests in an isolated workspace and approve accordingly.
+No process is automatically restarted or treated as successfully tested after a
+crash. Stronger OS confinement and durable orphan-process supervision remain
+follow-up work, not features claimed here.
+
+* Opt-in bounded source discovery
+
+=agentprolog_discovery:discovery_tools(Project, Files, Tools)= supplies separate
+=workspace_list= and =workspace_search= read tools. The host supplies an explicit
+manifest of 1–128 relative source-file paths; the model cannot expand it, choose
+another root, or supply shell commands. Register the tools and explicitly grant
+=tool(workspace_list)= and/or =tool(workspace_search)=. This does not change the
+existing coding plugin automatically.
+
+#+begin_src prolog
+:- use_module('/absolute/AgentProlog/prolog/agentprolog_discovery').
+% Inside a trusted tool-composition predicate:
+% discovery_tools('/absolute/project', ["src/main.pl", "README.md"], Tools).
+#+end_src
+
+=workspace_list({})= reports only that manifest and current path availability;
+it does not enumerate directories or read file contents. =workspace_search({text:
+"needle"})= performs literal case-sensitive search of the first 32 manifest files
+in host order, returning at most 64 matching lines, first matching column
+(zero-based), line number (one-based), a snippet capped at 160 characters, and
+source SHA-256. A repeated occurrence on one line is one result. The search text
+is 1–256 characters. Every file read is bounded to 65,536 UTF-8 bytes; results
+are capped by the canonical tool's 262,144-byte output and five-second runtime.
+
+Hidden path components, including =.git= and =.prolog=, are denied. This tool does
+not replace the existing explicit project-KB access APIs. Common dependency,
+build and secret directories are denied, as are credential-like filenames.
+Only a fixed source/document extension allowlist is accepted; JSON, dotenv,
+key and certificate files are not supported. Symlinks and traversal are rejected
+at registration and rechecked on each invocation. Repository instructions such
+as =AGENTS.md= are source content, not authority supplied by this tool.
+
+This is a deliberately restricted manifest discovery slice, not recursive
+repository indexing or a secret detector. Host operators must approve each file;
+a benign filename can still contain private content. There is no OS sandbox
+against hostile concurrent filesystem replacement, and hardlinks are not
+identity-deduplicated. A result hash identifies the read snapshot, not an atomic
+whole-project snapshot. Missing, oversized, changed-during-read and inaccessible
+files are reported as unresolved, not empty files. =budget_exhausted= reports
+file/match truncation; =absence_proven= is always false. Five-second tool failure
+is an execution failure, never proof that the query has no matches.
+
+* Ordered single-file patches
+
+=agentprolog_patch:patch_tool(Project, Tool)= is an opt-in =workspace_patch=
+write tool, separate from the existing workspace plugin. Register it and grant
+=tool(workspace_patch)= explicitly. It takes =path=, =expected_sha256= and
+=edits=, a list of 1–16 objects with =old_text= and =new_text=. Each string is
+at most 4,096 characters; the old text must be nonempty and occur exactly once
+in the current intermediate text. Edits run in list order, so a later edit can
+refer to the result of an earlier edit. Matching is literal, not fuzzy or regex.
+
+Preflight computes the entire result without writing. The write-approval details
+include all requested edits, edit count, expected original hash and resulting
+hash. Every intermediate result and the final file must fit the existing
+65,536-byte UTF-8 workspace limit. An invalid later edit aborts the entire
+preflight. On approval, the existing workspace executor rechecks the original
+hash and path, then atomically replaces the one file. Denial, cancellation or
+stale content does not apply any of the edits. The receipt includes final hash,
+byte count and applied edit count.
+
+This uses the existing explicitly trusted workspace boundary and is not a
+multi-file transaction, filesystem sandbox, fuzzy patch engine, formatter,
+undo history or syntax/behavior verifier. Existing workspace symlink/traversal
+checks and hostile-concurrent-process limitations apply. No tools, additional
+capabilities or default registrations are silently added. Use the existing test
+runner under its separate process approval to check behavior after an edit.
+
+* Composed bounded repair profile
+
+=agentprolog_repair:repair_tools(Project, Node, Sources, Tests, Policy, Tools,
+Capabilities)= combines the existing read/list/search/patch/test implementations.
+It supplies five tools and their explicit capability requirements; it neither
+registers them globally nor grants capabilities by itself. Use these fields in a
+trusted =agentprolog_config/1= alongside an existing provider and sensible parent
+budgets. It creates no model transport or repair scheduler.
+
+=Sources= is an explicit allowlist for both reading and patching, not only a
+search hint. The discovery source-path exclusions also apply here. Tests remain
+fixed operator configuration, and cannot be patched through this profile unless
+the operator deliberately includes them in =Sources=. The runner automatically
+includes all sources in its evidence snapshot, preserving and deduplicating
+additional =Policy.evidence_files=. The combined evidence list must fit the
+runner's 32-file limit. Existing per-file, output, execution and approval bounds
+still apply. Keep test fixtures outside the editable source allowlist where
+possible; executed source code nevertheless has host permissions and can write
+other files, so this is not an OS sandbox or adversarial-test integrity guarantee.
+
+A real DSH integration regression runs failing Node tests, obtains a separate
+write approval for a source patch, then obtains a second process approval and
+runs passing tests. The recorded before/after receipts retain distinct source
+hashes and actual exit codes. The model responses in this regression are
+scripted, including the chosen repair: this proves composed native orchestration
+and execution, not autonomous fault diagnosis, real-provider reasoning quality,
+or general correctness. No edit or process approval is bypassed. The profile
+has no automatic stop/promotion policy; the model and operator must inspect
+receipts, including nonzero exits, stale evidence, timeout and output truncation.

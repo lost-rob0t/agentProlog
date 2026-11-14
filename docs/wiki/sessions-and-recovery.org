@@ -117,7 +117,9 @@ the session/workspace identity and sequence cursor. The native call receives
 the current objective as its input. Although the UI accepts a typed “follow-up,”
 the host does *not* inject its whole persisted UI conversation as model history.
 It does not restore a previous provider conversation or a crashed execution
-cursor. Include required context explicitly in the objective or expose it through
+cursor. Opt-in =history_depth(N)= projects bounded completed pairs as described
+below; the default remains no cross-run history. Include other required context
+explicitly in the objective or expose it through
 the trusted native tools/compiler. =/resume= is not continuation from the exact
 instruction where a previous run stopped.
 
@@ -247,3 +249,222 @@ Sources: [[file:../../packages/conversation-ui/src/client.js][connection lifecyc
    choose a new turn or explicit =/resume= and expect new approvals and provider cost.
 6. For a deliberate config change or receipt-limit exhaustion, use a new private
    state directory; keep previous state for provenance rather than editing it away.
+
+* Opt-in bounded follow-up context (native history projection)
+
+Trusted operator configuration may set =runtime_options:[history_depth(8)]=.
+The default is zero (no cross-run context); the maximum is 32 completed turns.
+This option is part of the existing durable configuration hash, so changing it
+requires a separate state directory rather than silently reinterpreting a session.
+
+The host records the objective and final assistant answer only after successful
+completion. It retains at most the configured number of pairs in =session.json=,
+with each text capped at 16,000 characters. Failed, cancelled, interrupted and
+unapproved runs are not added. This is a bounded working memory, NOT an archival
+transcript: eviction and text truncation are irreversible in this store.
+
+At the next native run those pairs go through Prolog-RLM's
+=conversation_context_pack/3=. Its token ledger caps the history projection at
+=min(4096, max_total_tokens / 4)= estimated tokens. Both members of a pair must
+survive selection or neither is sent. History retains user/assistant roles, never
+becomes a system instruction, and does not grant capabilities. Trusted system
+instructions and skills still use the existing prompt compiler. The canonical
+runtime still owns execution, approvals, cancellation and total usage limits.
+
+This slice intentionally does not preserve tool messages, reasoning, intermediate
+questions, interrupted cursors, cold retrieval or warm summaries. It does not use
+=conversation_turn/4= or add a second execution loop. =/resume= remains a new run,
+not cursor resurrection. There is no claim of unlimited effective context.
+
+Verification: =npm run test:generic --prefix packages/conversation-ui= includes
+two real native session turns separated by a process restart. Model transport is
+a deterministic fixture which refuses the second answer unless it receives the
+first user marker and assistant response in their original roles. Session unit
+tests cover disabled memory, depth, configuration identity and budget eviction.
+
+A second integration test uses the production OpenAI-compatible HTTP transport
+against a loopback server, with no injected model/planner handler. It verifies
+both turns across process restart and inspects the second HTTP request: prior
+user/assistant messages retain their roles. Only trusted system messages use
+=provider_context/2=; conversation pairs remain ordinary request messages. This
+is a transport integration test, not a live paid-provider or reasoning benchmark.
+
+* Live terminal presentation
+
+Interactive TTY sessions use a compact chat-first DSH view. The activity facade
+shows =Thinking=, =Working=, or the pending interaction, with a 250ms presentation
+clock. Elapsed time is explicitly =observed=: it starts when this UI sees the
+run or reconnects, not a measurement of private reasoning time. Token counts are
+actual reported aggregate totals only; until a usage event arrives the UI shows
+=tokens pending=. It does not infer hidden reasoning tokens or fabricate a
+smoothly increasing counter. =NO_COLOR= disables accent colors.
+
+Canonical visible =text_delta= events repaint at a bounded 40ms cadence without
+waiting for the stream to stop. No fake typing delay is applied. Provider and
+configuration limitations remain important: the current prompt/history wrapper
+uses completion responses, not SSE, so those turns display live activity but
+receive their answer only when completion arrives. Native runtime configurations
+that already emit text deltas display those incrementally. The trusted =stream_responses(true)= runtime option enables the projected
+provider SSE adapter described below. Without it, this completion behavior is
+retained.
+
+=/inspect= toggles a persistent full evidence-oriented diagnostic view; the
+heartbeat keeps that mode until =/inspect= is entered again. Explicit reasoning
+fields and reasoning/analysis messages are hidden in both presentations. Tools,
+approvals, outcomes and public evidence remain inspectable. Piped output keeps
+its existing plain diagnostic format and does not get a heartbeat flood.
+
+Explicit bounded image input is available through the opt-in contract below.
+Inline terminal raster rendering is not implemented; image-control escape codes
+and remote-URL fetching are not used.
+
+
+* Projected provider streaming (opt-in)
+
+A trusted configuration can add =stream_responses(true)= to =runtime_options=.
+For the default provider handler, this preserves compiled system context and
+ordinary user/assistant history roles while using the canonical Prolog-RLM SSE
+transport. Custom model/planner handlers are not silently replaced. Visible text
+is emitted as it arrives; provider reasoning events are discarded by the UI
+adapter. A final stream failure is still a failed run, even when partial public
+text has already appeared. Partial text can remain in the canonical transcript
+but is not a successful completed history turn. Cancellation uses the existing
+execution token and stops later session updates.
+
+Local production-client loopback tests hold a response open after its first
+visible delta, verify it is displayed before completion, then verify history
+roles after restart. They also exercise cancellation while the socket is open.
+No custom model handler is involved in these tests.
+
+Transport diagnosis: the original delayed Node HTTP chunk fixture closed its
+response after SWI half-closed the request socket, before queued chunks were
+written. That was not evidence of a general SWI chunk-decoder failure. Separate
+local tests with a half-open raw HTTP fixture verify fragmentation and truncated
+chunk rejection. They also exposed a canonical UTF-8 decoding bug: non-ASCII
+SSE text can be decoded as octets by the currently pinned runtime. Its fix is
+under separate runtime review and is not included in this dependency pin.
+Connection-close ASCII streaming is tested here. No fallback silently repeats a
+potentially billable provider request.
+Image input uses the separate explicit contract below.
+
+Approval menus print the complete sanitized approval row, including any diff,
+arguments and target details. TTY background redraws pause while an interaction
+menu is open so the action does not disappear during review. Even an explicit
+=/approve ID DECISION= opens those details first; a later numbered choice is
+required to send a decision. Unknown token usage (=tokens_known:false=) is shown
+as pending, never as a fabricated known zero.
+
+
+* Explicit bounded image input
+
+A trusted =image_inputs(true)= runtime option enables one local PNG or JPEG
+attachment per ordinary direct-mode turn, with an explicitly configured default
+provider. Custom model/planner handlers, native slash objectives, recursive mode,
+remote URLs, SVG, video, and multiple images are unsupported. The provider/model
+must itself support vision; transport acceptance is not proof of image reasoning.
+
+=/image PATH= reads one explicitly selected regular local file of at most 256 KiB
+and stages its bytes without sending them. Symlink leaves are rejected. The CLI
+shows the selected basename, media type and target profile. =/send-image QUESTION=
+is the separate explicit instruction to transmit that selection to the configured
+provider; =/image-clear= discards it. Ordinary text turns never attach a staged
+image implicitly. The raw API equivalent is =session.turn= with =objective= and
+=images:[{name,mime,data}]=, where =data= is canonical base64, not a path or URL.
+The backend never opens a caller-supplied image path. Opted-in image turn
+frames permit at most 524,288 JSON characters to carry the 256 KiB base64
+payload and bounded objective; ordinary frames retain the 65,536-character
+limit. Leading whitespace does not bypass the prohibition on attaching images
+to native slash commands.
+
+Both sides enforce size and PNG/JPEG signature checks; these are not complete
+image decoders or metadata strippers. The selected bytes, including any embedded
+metadata, are transmitted. Files masquerading under an image extension are not
+accepted solely by extension. The backend computes a content hash and sends
+actual provider image-content parts, not a filename or textual description.
+
+Image bytes are transient to the run and not intentionally stored in the durable
+session, request receipts, transcript or completed-turn history. Request receipts
+use a separate payload digest for image commands. Public metadata records the
+basename, MIME, byte count and hash. History records an explicit reattach-required
+marker, not the image: later questions cannot implicitly resend or inspect it.
+=/resume= rejects an image-bearing previous objective until the user reselects
+and explicitly sends the image. This also applies after process restart.
+A provider can return information about the image in its ordinary text response,
+which is retained like other assistant text. Provider retention policies are
+separate from this local transient-storage behavior.
+
+Tests use a small public synthetic pixel and a real production HTTP client to
+assert exact transmitted bytes, no automatic replay after restart, hash-only
+receipts, opt-in rejection and explicit CLI selection/send separation. They do
+not establish that a real vision model interprets the image correctly. Image
+billing/tokenization remains provider-specific; the UI does not invent image
+token counts, and existing reported-usage budgets still apply.
+
+* Adaptive terminal workspace
+
+TTY chat uses the actual terminal dimensions: a conversation viewport, a small
+session/tool/approval rail on wide screens, and a bottom-anchored composer.
+Narrow screens omit the rail. Session UUIDs are kept in diagnostics, not the
+normal chat header. Only observed user requests and canonical assistant output
+are shown; after reconnect the current request is labelled separately rather
+than inventing missing conversation history. The viewport follows recent output;
+=/inspect= retains the complete canonical diagnostic view. The retained transcript viewport is bounded to the latest eight messages;
+a multiline input editor is not yet implemented.
+
+The thinking line remains an activity facade with observed elapsed time and
+reported usage only. Approval inspection still suspends redraw, displays the
+exact action details, and requires a subsequent explicit choice. Selecting an
+image is still not transmission. The composer shows a locally staged attachment
+when available. Piped output retains the plain diagnostic format.
+
+Display widths use a Unicode 17 normative East Asian W/F table (Unicode License v3) and grapheme
+boundaries. Tabs render as four spaces. Since terminals disagree about joined
+emoji widths, the normal chat facade separates ZWJ components with a space;
+the canonical transcript is unchanged. Ambiguous-width characters assume the
+common one-column policy. An optional real-terminal cursor-position probe is
+available as =node packages/conversation-ui/test/terminal-width.probe.js=.
+
+* Bounded transcript navigation
+
+PageUp/PageDown or =/scroll up|down= move within the retained transcript.
+=/bottom= returns to the live tail. Scrolling up freezes a presentation copy so
+incoming text cannot shift what is being inspected; live approvals, questions,
+tool status and connection state remain current outside that copy. The header
+labels a paused transcript. Navigation sends no session/model requests.
+
+The draft input remains in readline during redraw. While an approval/question
+selection menu is open, page keys do not redraw or obscure it. Terminal resize
+returns to live output to reflow at the new width. This is bounded presentation
+history, not a new durable conversation store or infinite scrollback.
+
+** Explicit multiline composer
+
+=/compose= opens or resumes a local, in-memory draft. Enter appends an exact
+line (including indentation and blank lines); ordinary slash lines are content,
+not UI commands. =/draft-preview= prints numbered lines, =/draft-edit N TEXT=
+replaces a line, and =/draft-undo= removes the last line. =/draft-insert N TEXT=
+inserts before a line (or appends at the next line number); =/draft-delete N=
+removes one line. Edits preserve spaces and reject invalid positions or limit
+overflows without changing the draft. Preview defaults to the first 20 lines;
+=/draft-preview N END= inspects an inclusive range of at most 50 lines.
+Insert/delete preview the nearby lines rather than dumping the whole draft. The limits are 256 lines, 16,000 Unicode characters
+(the canonical objective limit), and 16 KiB UTF-8. =/draft-literal TEXT= inserts reserved draft control text.
+
+=/draft-send= submits one objective. =/draft-send-image= explicitly includes the
+previously selected image. Drafts starting with a slash command are rejected so
+the native backend cannot unexpectedly dispatch the draft as an expert command.
+Successful sends clear the draft; failed sends retain it, but a transport failure
+can have an uncertain remote outcome: inspect/reconnect before manually retrying.
+No draft is persisted to disk or automatically sent on exit.
+
+=/draft-pause= keeps the draft and returns to ordinary commands; =/compose=
+resumes it. =/draft-discard= clears it. Pending interaction changes print a notice;
+pause and use =/approve= or =/answer= to inspect the actual current interaction.
+Full-screen redraw is suspended while composing so line edits and previews remain
+visible. Backend streaming still runs; return to chat to see its latest output.
+This is a bounded line composer, not a full-screen editor or a bracketed-paste
+security boundary. Readline supports editing the current line; completed lines
+use the explicit edit command. Transcript navigation remains in ordinary chat.
+
+Reproducible PTY check (production CLI with synthetic protocol sidecar, no LLM):
+=python packages/conversation-ui/test/composer.pty.py "$(command -v node)"=.

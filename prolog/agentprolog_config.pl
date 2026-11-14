@@ -1,5 +1,5 @@
 :- module(agentprolog_config,
-          [load_configuration/3, default_configuration/1, register_config_tools/2]).
+          [load_configuration/3, default_configuration/1, register_config_tools/2, named_agent_configuration/3]).
 
 /** <module> Explicitly trusted Prolog configuration for a generic agent host.
 
@@ -182,6 +182,8 @@ resolve_agent_paths(Source,Name-Layer,Name-Resolved) :- resolve_skill_paths(Sour
 relative_source(Directory,Path,Absolute) :-
     absolute_file_name(Path,Absolute,[relative_to(Directory),access(read),file_errors(error)]).
 
+named_agent_configuration(Base,Name,Config) :-
+    get_dict(Name,Base.agents,_),select_agent(Name,Base.capabilities,Base,Config).
 select_agent(none,_,Config,Config) :- !.
 select_agent(Name,Allowed,Base,Config) :-
     (get_dict(Name,Base.agents,Layer) -> true ; throw(error(agentprolog_config(unknown_agent(Name)),_))),
@@ -224,9 +226,13 @@ valid_runtime_options(Options) :-
 runtime_option_key(Option, Key) :-
     compound(Option), compound_name_arity(Option, Key, 1),
     memberchk(Key, [provider,provider_name,model_handler,planner_handler,prompt_compile_mode,system_prompt,
-                   agent_name,planner_max_tokens]),
+                   agent_name,planner_max_tokens,history_depth,subagents,army_max_children,stream_responses,image_inputs]),
     ground(Option), !,
-    (memberchk(Key,[model_handler,planner_handler])
+    (Key==army_max_children -> arg(1,Option,N),must_be(integer,N),between(1,32,N)
+    ; Key==subagents -> arg(1,Option,V), memberchk(V,[true,false])
+    ; memberchk(Key,[stream_responses,image_inputs]) -> arg(1,Option,B),memberchk(B,[true,false])
+    ; Key==history_depth -> arg(1,Option,N), must_be(integer,N), between(0,32,N)
+    ; memberchk(Key,[model_handler,planner_handler])
     -> arg(1,Option,Handler), qualified_closure(Handler)
     ; true).
 runtime_option_key(Option, _) :- throw(error(agentprolog_config(unsupported_runtime_option(Option)), _)).
