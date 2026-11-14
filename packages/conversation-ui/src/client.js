@@ -103,7 +103,7 @@ export class Client extends EventEmitter {
       requireValue(this.ready, 'snapshot_required');
       if (!this.view.event(frame)) return;
     } else throw new ProtocolError('unexpected_frame');
-    this.emit('view', this.view);
+    this.emit('view', this.view, frame);
   }
   request(frame) {
     requireValue(this.connected, 'disconnected');

@@ -21,9 +21,19 @@
 :- use_module(library(rlm_effect), [rlm_effect_store_open/1, rlm_effect_store_close/0, rlm_effect_normalize/2]).
 :- use_module('./agentprolog_config').
 :- use_module('./agentprolog_prompt').
+:- use_module('./agentprolog_history').
+:- use_module('./agentprolog_images').
+:- use_module('./agentprolog_experts').
+:- use_module('./agentprolog_commands').
+:- use_module('./agentprolog_army').
+:- use_module('./agentprolog_rsi').
+:- use_module('./agentprolog_sleep').
+:- use_module('./agentprolog_context_experiment').
+:- use_module('./agentprolog_learning').
 
 
-:- dynamic worker_state/2, run_token/2, pending_native/4.
+:- dynamic run_images/2.
+:- dynamic worker_state/2, run_token/2, pending_native/4, memory_run_live/1.
 :- use_module(library(rlm_authority), [rlm_approve/2, rlm_deny/3, rlm_pending_resolution_async/2]).
 :- dynamic checkpoint/1, state_directory/1, executor/1, active/2, negotiated/0.
 :- initialization(cli_main, main).
@@ -60,13 +70,14 @@ serve(Directory, Config) :-
 initialize(Directory, Config) :-
     retractall(worker_state(_,_)), retractall(run_token(_,_)),
     retractall(checkpoint(_)), retractall(state_directory(_)),
-    retractall(executor(_)), retractall(active(_, _)), retractall(negotiated),
+    retractall(run_images(_,_)),retractall(executor(_)), retractall(active(_, _)), retractall(negotiated),
     assertz(state_directory(Directory)), assertz(executor(Config)),
     config_binding(Config, Binding), state_path(Path),
     ( exists_file(Path)
     -> setup_call_cleanup(open(Path, read, S), json_read_dict(S, State), close(S)),
        State.version = 1,
        (get_dict(config_binding,State,Binding) -> true ; throw(error(session_configuration_mismatch,_))),
+       (get_dict(history,State,History) -> history_validate(Config,History) ; true),
        assertz(checkpoint(State)),
        snapshot(_),
        ( (memberchk(State.phase,["running","cancelling"]);get_dict(native_pending,State,true))
@@ -105,15 +116,22 @@ loop :-
       reap_futures, loop ).
 
 handle_line(Line) :-
-    string_length(Line, Size), Size =< 65536,
+    % Base64 for one 256 KiB image plus bounded objective/envelope. Ordinary
+    % requests retain the smaller limit. Image validation below still applies.
+    string_length(Line, Size), Size =< 524288,
     atom_json_dict(Line, Frame, []),
+    (Size =< 65536 -> true
+    ; Frame.kind == "command", Frame.command == "session.turn",
+      executor(ImageConfig), image_enabled(ImageConfig),
+      get_dict(images,Frame.payload,[_])),
     ui_v1_validate_frame(Frame, ok(_)),
     with_mutex(agentprolog_session, dispatch(Frame)).
 
 dispatch(F) :- F.kind == "negotiate", !,
     P = F.payload,
     memberchk("prolog_agent_ui_v1", P.protocol_versions),
-    Supported = ["streaming_text","generic_tools","approvals","questions","verification","usage","traces"],
+    BaseSupported = ["streaming_text","generic_tools","approvals","questions","verification","usage","traces"],
+    executor(ImageConfig),(image_enabled(ImageConfig)->Supported=["image_input"|BaseSupported];Supported=BaseSupported),
     ( get_dict(required_capabilities, P, Required) -> true ; Required = [] ),
     ( forall(member(C, Required), memberchk(C, Supported))
     -> (negotiated -> true ; assertz(negotiated)),
@@ -132,7 +150,7 @@ command_frame(F) :-
     ( F.session_id \== S.session_id
     -> error_frame("session_mismatch", "Unknown session", F.request_id)
     ; member(Receipt, S.receipts), Receipt.request_id == F.request_id
-    -> ( Receipt.command == F.command, Receipt.payload =@= F.payload
+    -> ( Receipt.command == F.command, same_payload(Receipt,F.payload)
        -> write_frame(Receipt.result)
        ; error_frame("request_conflict", "Request ID reused with different payload", F.request_id) )
     ; admit_request(F),
@@ -147,15 +165,23 @@ execute_command(F, Payload) :-
 execute_command(F, _{accepted:true}) :- F.command == "session.turn", !,
     (get_dict(objective, F.payload, Objective), string(Objective) -> true ; reject("invalid_objective")),
     string_length(Objective, Len), (Len =< 16000 -> true ; reject("objective_too_large")),
+    executor(ImageConfig),(get_dict(images,F.payload,ImageInputs)->true;ImageInputs=[]),
+    image_request(ImageConfig,ImageInputs,Images,Refs),
+    ( Images\=[],
+      ( command_head(Objective,Head,_), sub_string(Head,0,1,_,"/")
+      ; \+ command_head(Objective,_,_) )
+    -> reject("image_requires_plain_objective")
+    ; true ),
     ensure_inactive,
     ( normalize_space(string(""), Objective)
     -> uuid_string(Id),
        event(agent_event(question_required, Id, "What would you like the agent to do?", [])),
        update(_{phase:"awaiting_question"})
-    ; start(Objective)
+    ; start(Objective,Images,Refs)
     ).
 execute_command(F, _{accepted:true}) :- F.command == "session.resume", !,
     ensure_inactive, checkpoint(S),
+    (get_dict(image_refs,S,Refs),Refs\=[] -> reject("reattach_image_before_resume") ; true),
     (S.objective \== "" -> start(S.objective) ; reject("missing_objective")).
 execute_command(F, _{accepted:true}) :- F.command == "session.cancel", !,
     checkpoint(S),
@@ -198,15 +224,18 @@ ensure_inactive :- checkpoint(S),
     ( memberchk(S.phase, ["running", "cancelling", "awaiting_approval", "awaiting_question"])
     -> reject("session_busy") ; true ).
 
-start(Objective) :-
+start(Objective) :- start(Objective,[],[]).
+start(Objective,Images,Refs) :-
     uuid_string(Run), checkpoint(S), executor(Config), Profile = Config.profile,
     Budget = Config.budget,
     ui_v1_initial_view(S.session_id, Empty), put_dict(at_seq, Empty, S.view.at_seq, View),
     update(_{view:View}), snapshot(NewSnapshot), write_frame(NewSnapshot),
-    update(_{phase:"running", run_id:Run, objective:Objective, candidate:"", approval_id:"", evidence:[], document:null}),
+    update(_{image_refs:Refs,phase:"running", run_id:Run, objective:Objective, candidate:"", approval_id:"", evidence:[], document:null}),
     event(agent_event(run_started, _{run_id:Run, workspace_id:S.workspace_id,
           objective:Objective, profile:Profile, budget:Budget})),
+    (Refs==[] -> true ; event(agent_event(trace,_{kind:"image_attachment",references:Refs,durable_bytes_retained:false}))),
     rlm_cancellation_token(Token), assertz(run_token(Run,Token)),
+    assertz(run_images(Run,Images)),
     assertz(worker_state(Run,pending)),
     rlm_async_submit(agentprolog_session:work(Run, Objective), Future),
     assertz(active(Run, Future)).
@@ -219,11 +248,12 @@ begin_work(Run) :-
        retractall(worker_state(Run,_)),assertz(worker_state(Run,running)))).
 end_work(Run) :-
     with_mutex(agentprolog_session,
-      (retractall(worker_state(Run,_)),assertz(worker_state(Run,finished)),
+      (retractall(run_images(Run,_)),retractall(worker_state(Run,_)),assertz(worker_state(Run,finished)),
        checkpoint(S),
        (S.run_id == Run, S.phase == "cancelling"
         -> finish(_{status:"cancelled",cleanup_confirmed:true}) ; true))).
 request_stop(Run) :-
+    retractall(run_images(Run,_)),
     update(_{phase:"cancelling"}),
     event(agent_event(verification,"cancellation",_{status:"requested",cleanup_confirmed:false})),
     (pending_native(Run,Id,_,Queue)
@@ -233,16 +263,95 @@ request_stop(Run) :-
     (worker_state(Run,running) -> true
      ; finish(_{status:"cancelled",cleanup_confirmed:true})).
 work_body(Run,Objective) :-
-    executor(Config),
+    executor(Base), checkpoint(State),
+    (get_dict(history,State,History) -> true ; History=[]),
+    (run_images(Run,Images)->true;Images=[]),
+    put_dict(_{history:History,images:Images},Base,Config),
     catch((native_execute(Config, Objective, Run, Outcome) -> true ; Outcome=error(failed)), _, Outcome=error(exception)),
     with_mutex(agentprolog_session,
       catch((complete(Run, Outcome) -> true ; fail_run(Run)), _, fail_run(Run))).
+
+native_execute(Config,Objective,Run,Outcome) :-
+    command_head(Objective,"/learn",Arguments),!,
+    (command_head(Arguments,NameString,Tail),string_codes(Tail,Codes),forall(member(C,Codes),command_space(C))
+     -> atom_string(Name,NameString),bounded_native_read(Config,Run,learn_execute(Config,Name,Outcome))
+     ; Outcome=error(_{kind:invalid_request,phase:runtime})).
+
+native_execute(Config,Objective,Run,Outcome) :-
+    command_head(Objective,"/rsi-context",Arguments),!,
+    (command_head(Arguments,NameString,Tail),string_codes(Tail,Codes),forall(member(C,Codes),command_space(C))
+     -> atom_string(Name,NameString),
+        bounded_native_read(Config,Run,context_experiment_execute(Config,Run,Name,Outcome))
+     ; Outcome=error(_{kind:invalid_request,phase:runtime})).
+
+native_execute(Config,Objective,Run,Outcome) :-
+    command_head(Objective,"/sleep",Arguments),!,string_codes(Arguments,Codes),
+    (forall(member(C,Codes),command_space(C))
+     -> (get_dict(history,Config,History) -> true ; History=[]),run_token(Run,Token),
+        bounded_native_read(Config,Run,sleep_preview(Config,History,Token,Outcome))
+     ; Outcome=error(_{kind:invalid_request,phase:runtime})).
+
+native_execute(Config,Objective,Run,Outcome) :-
+    command_head(Objective,"/rsi",Arguments),!,
+    (command_head(Arguments,NameString,Tail),string_codes(Tail,Codes),NameString\=="",forall(member(C,Codes),command_space(C))
+     -> atom_string(Name,NameString),
+        setup_call_cleanup(tool_registry_create(Registry),
+         (forall(member(tool(S,H),Config.tools),(observed_binding(H,Run,S.name,O),tool_register(Registry,S,O,ok(_)))),
+          bounded_native_read(Config,Run,rsi_execute(Config,Registry,Name,Config.project,Outcome))),
+         tool_registry_destroy(Registry))
+     ; Outcome=error(_{kind:invalid_request,phase:tool})).
+
+native_execute(Config,Objective,Run,Outcome) :-
+    command_head(Objective,Command,Arguments),memberchk(Command,["/army","/swarm"]),!,
+    (Command=="/swarm" -> swarm_notice(Notice),
+      session_event(Run,agent_event(trace,_{kind:"swarm_stub",message:Notice})) ; Notice=""),
+    (army_plan_request(Arguments,Tasks)
+    -> bounded_native_read(Config,Run,army_tasks_execute(Config,Run,Tasks,Result)),
+       (Result=ok(R),Notice\=="" -> string_concat(Notice,"\n",Prefix),string_concat(Prefix,R.value,Text),
+         string_bytes(Text,NoticeBytes,utf8),length(NoticeBytes,NoticeSize),
+         (NoticeSize=<Config.budget.max_output_bytes -> put_dict(value,R,Text,Prefixed),Outcome=ok(Prefixed)
+          ; Outcome=error(_{kind:budget_exceeded,phase:runtime,usage:R.usage}))
+        ; Outcome=Result)
+    ; Outcome=error(_{kind:subagent_configuration,phase:runtime})).
+
+native_execute(Config,Objective,Run,Outcome) :-
+    command_head(Objective,"/remember",Text),!,
+    string_codes(Text,Codes),
+    (forall(member(C,Codes),command_space(C))
+    -> bounded_native_read(Config,Run,memory_read_command(Config,Run,Outcome))
+    ; setup_call_cleanup(assertz(memory_run_live(Run)),
+         bounded_native_read(Config,Run,memory_command(Config,Run,Text,Outcome)),
+         retractall(memory_run_live(Run)))).
+
+native_execute(Config,Objective,Run,Outcome) :-
+    command_head(Objective,Command,Arguments),memberchk(Command,["/next","/handoff"]),!,
+    string_codes(Arguments,Codes),
+    (forall(member(C,Codes),command_space(C))
+    -> (Command=="/next" -> Op=next,Name=workflow_next ; Op=handoff,Name=workflow_handoff),
+       setup_call_cleanup(tool_registry_create(Registry),
+         (forall(member(tool(Schema,Handler),Config.tools),
+            (observed_binding(Handler,Run,Schema.name,Observed),tool_register(Registry,Schema,Observed,ok(_)))),
+          bounded_native_read(Config,Run,workflow_command(Config,Registry,Op,Name,Outcome))),
+         tool_registry_destroy(Registry))
+    ; Outcome=error(_{kind:invalid_workflow_command,phase:tool})).
+
+native_execute(Config,Objective,Run,Outcome) :-
+    ask_command(Objective), !,
+    (ask_request(Objective,Name,Question)
+    -> setup_call_cleanup(tool_registry_create(Registry),
+         (forall(member(tool(Schema,Handler),Config.tools),
+            (observed_binding(Handler,Run,Schema.name,Observed),tool_register(Registry,Schema,Observed,ok(_)))),
+          bounded_native_read(Config,Run,ask_execute(Config,Registry,Name,Question,Outcome))),
+         tool_registry_destroy(Registry))
+    ; Outcome=error(_{kind:invalid_expert_question,phase:tool})).
 
 native_execute(Config, Objective, Run, Outcome) :-
     setup_call_cleanup(tool_registry_create(Registry),
       (forall(member(tool(Schema, Handler), Config.tools),
          (observed_binding(Handler,Run,Schema.name,Observed), tool_register(Registry, Schema, Observed, ok(_)))),
-        prepare_runtime_options(Config,Registry,Objective,RuntimeOptions),
+        (memberchk(stream_responses(true),Config.runtime_options)
+         -> put_dict(stream_sink,Config,agentprolog_session:session_event(Run),PromptConfig) ; PromptConfig=Config),
+        prepare_runtime_options(PromptConfig,Registry,Objective,RuntimeOptions),
         ((memberchk(model_handler(_),RuntimeOptions);memberchk(planner_handler(_),RuntimeOptions)) -> Stream=[]
         ; Stream=[text_delta_handler(prolog_agent_ui_facade:ui_stream_handler(Run,agentprolog_session:session_event(Run)))]),
        (run_token(Run,Token) -> Cancel=[cancel_token(Token)] ; Cancel=[]),
@@ -251,6 +360,92 @@ native_execute(Config, Objective, Run, Outcome) :-
        (get_dict(mode,Config,Mode) -> true ; Mode=direct),
        native_mode(Mode,Objective,Options,Initial), native_continuation(Run,Initial,Outcome)),
       tool_registry_destroy(Registry)).
+
+:- meta_predicate bounded_native_read(+,+,0).
+bounded_native_read(Config,Run,Goal) :-
+    (run_token(Run,T) -> Cancel=[cancel_token(T)] ; Cancel=[]),
+    rlm_completion:cancellation_option(Cancel,Token,Own),
+    setup_call_cleanup(rlm_completion:register_current_thread(Token),
+      (rlm_completion:check_cancelled(Token),call_with_time_limit(Config.budget.time_limit,Goal),
+       rlm_completion:check_cancelled(Token)),rlm_completion:cleanup_cancellation(Token,Own)).
+
+workflow_command(Config,_,_,_,error(_{kind:budget_exceeded,phase:tool})) :-
+    Config.budget.max_tool_calls<1,!.
+workflow_command(Config,Registry,Op,Name,Outcome) :-
+    (member(tool(Schema,tool_handler(agentprolog_workflow:preflight(_,_,Op),
+                                    agentprolog_workflow:execute(_,Op))),Config.tools),Schema.name==Name
+    -> tool_invoke_execute(Registry,Config.capabilities,Name,_{},[],Result),
+       (Result.outcome=ok(Envelope)
+        -> Text=Envelope.value.report,string_bytes(Text,Bytes,utf8),length(Bytes,N),
+           (N=<Config.budget.max_output_bytes
+            -> Outcome=ok(_{value:Text,usage:_{model_calls:0,tool_calls:1,total_tokens:0}})
+            ; Outcome=error(_{kind:budget_exceeded,phase:tool}))
+        ; Outcome=Result.outcome)
+    ; Outcome=error(_{kind:workflow_not_configured,phase:tool})).
+
+memory_read_command(Config,Run,Outcome) :-
+ (Config.budget.max_tool_calls<1 -> Outcome=error(_{kind:budget_exceeded,phase:tool})
+ ; setup_call_cleanup(tool_registry_create(Registry),
+   (forall(member(tool(S,H),Config.tools),(observed_binding(H,Run,S.name,O),tool_register(Registry,S,O,ok(_)))),
+    tool_invoke_execute(Registry,Config.capabilities,memory_recall,_{},[],Result),
+    (Result.outcome=ok(E) -> Text=E.value.report,string_bytes(Text,Bytes,utf8),length(Bytes,N),
+      (N=<Config.budget.max_output_bytes -> Outcome=ok(_{value:Text,usage:_{model_calls:0,tool_calls:1,total_tokens:0}})
+       ; Outcome=error(_{kind:budget_exceeded,phase:tool}))
+     ; Outcome=Result.outcome)),tool_registry_destroy(Registry))).
+
+memory_command(Config,_,_,error(_{kind:budget_exceeded,phase:tool})) :-
+    (Config.budget.max_tool_calls<1 ; Config.budget.max_output_bytes<256),!.
+memory_command(Config,Run,Text,Outcome) :-
+    (member(tool(Schema,tool_handler(agentprolog_memory:preflight(_,_),
+                                   agentprolog_memory:execute(_))),Config.tools),Schema.name==memory_remember
+    -> setup_call_cleanup(tool_registry_create(Registry),
+         (forall(member(tool(S,H),Config.tools),
+            (observed_binding(H,Run,S.name,O),tool_register(Registry,S,O,ok(_)))),
+          run_token(Run,Token),get_time(Now),Deadline is Now+Config.budget.time_limit,
+          tool_invoke_execute(Registry,Config.capabilities,memory_remember,_{text:Text},
+            [pending_execution_guard(agentprolog_session:memory_guard(Run,Token,Deadline))],Result),
+          memory_resolution(Run,Deadline,Result.outcome,Resolved),
+          (Resolved=ok(E) -> Outcome=ok(_{value:E.value.report,usage:_{model_calls:0,tool_calls:1,total_tokens:0}})
+           ; Outcome=Resolved)),tool_registry_destroy(Registry))
+    ; Outcome=error(_{kind:workflow_not_configured,phase:tool})).
+
+memory_guard(Run,Token,Deadline,Continuation,Resolution) :-
+    (memory_run_live(Run) -> true ; throw(error(rlm_cancelled(Token),closed_run))),
+    setup_call_cleanup(rlm_completion:register_current_thread(Token),
+      (rlm_completion:check_cancelled(Token),get_time(Now),Remaining is Deadline-Now,
+       (Remaining>0 -> true ; throw(time_limit_exceeded)),
+       call_with_time_limit(Remaining,call(Continuation,Resolution))),
+      rlm_completion:cleanup_cancellation(Token,false)).
+
+memory_resolution(Run,Deadline,approval_required(Pending),Outcome) :- !,
+    atom_string(Pending.id,Id),Owner=memory(Run),
+    setup_call_cleanup(rlm_authority:rlm_pending_resolution_retain(Pending.id,Owner,Future),
+      setup_call_cleanup(message_queue_create(Queue),
+        setup_call_cleanup(
+          with_mutex(agentprolog_session,
+            (assertz(pending_native(Run,Id,memory(Pending.id),Queue)),
+             update(_{phase:"awaiting_approval",native_pending:true,approval_id:Id}),
+             event(agent_event(approval_required,Id,Run,Pending,["allow_once","deny"])))),
+          (get_time(WaitStart),Wait is max(0,Deadline-WaitStart),
+           (thread_get_message(Queue,decision(Decision),[timeout(Wait)]) -> true
+            ; throw(error(memory_approval_expired,_))),
+           (Decision=="allow_once"
+            -> rlm_approve(Pending.id,ok(_)),rlm_future_await(Future,Resolution),
+               (Resolution.outcome=ok(Value) -> Outcome=ok(_{value:Value}) ; Outcome=Resolution.outcome)
+            ; rlm_deny(Pending.id,operator_denied,_),Outcome=error(_{kind:cancelled,phase:tool}))),
+          close_memory_pending(Run,Id,Pending.id)),
+        message_queue_destroy(Queue)),
+      rlm_authority:rlm_pending_resolution_release(Pending.id,Owner)).
+memory_resolution(_,_,Outcome,Outcome).
+close_memory_pending(Run,Id,Pending) :-
+    catch(rlm_deny(Pending,run_closed,_),_,true),
+    with_mutex(agentprolog_session,
+      (retractall(pending_native(Run,Id,_,_)),
+       (checkpoint(S),member(A,S.view.approvals),A.id==Id,A.status=="pending"
+        -> event(agent_event(approval_resolved,Id,"deny")) ; true),
+       (checkpoint(Current),Current.run_id==Run,Current.phase=="awaiting_approval"
+        -> update(_{phase:"running",native_pending:false}) ; true))).
+
 
 native_mode(direct,Objective,Options,Outcome) :- !,
     rlm_direct_execute(Objective,text(Objective),[suspend_on_approval(true)|Options],Outcome).
@@ -300,12 +495,20 @@ observed_execute(Handler,Run,Name,Args,Value) :-
     catch((call(Handler,Args,Value) -> true ; throw(error(tool_handler_failed,_))),Error,
       (session_event(Run,agent_event(tool_finished,Id,_{status:"failed"})),throw(Error))),
     session_event(Run,agent_event(tool_output,Id,Value)),
-    session_event(Run,agent_event(tool_finished,Id,_{status:"ok"})).
+    (is_dict(Value),get_dict(expert_status,Value,ExpertStatus),ExpertStatus\==succeeded
+     -> Finished="failed" ; Finished="ok"),
+    session_event(Run,agent_event(tool_finished,Id,_{status:Finished})).
 
 session_event(Run, Event) :-
     with_mutex(agentprolog_session,
         ( (checkpoint(S) -> true ; S=_{run_id:"",phase:"idle"}), (S.run_id == Run, S.phase == "running"
          -> bounded_event(Event, Bounded), event(Bounded) ; true))).
+
+% Cumulative usage snapshots survive cancellation and later child failures.
+session_usage(Run,Usage) :-
+    with_mutex(agentprolog_session,
+      (checkpoint(S),S.run_id==Run,memberchk(S.phase,["running","cancelling"])
+       -> event(agent_event(usage,Usage)) ; true)).
 
 complete(Run, Outcome) :-
     checkpoint(S),
@@ -349,7 +552,8 @@ safe_failure(_, _{status:"failed",reason:"native_execution_failed",code:"runtime
 safe_category(Dict,Key,Text) :-
     get_dict(Key,Dict,Value),
     memberchk(Value,[completion_fault,transport_error,provider_error,budget_exceeded,
-      cancelled,timeout,capability_error,invalid_request,effect_store_required,approval_required,runtime,completion,provider,
+      cancelled,timeout,capability_error,invalid_request,unknown_expert,invalid_expert_question,expert_not_succeeded,invalid_workflow_command,workflow_not_configured,subagent_configuration,subagent_failed,
+      effect_store_required,approval_required,runtime,completion,provider,
       budget,tool,context,plan,validation,authority,native_result]), !,
     atom_string(Value,Text).
 safe_category(_,_,"unknown").
@@ -364,7 +568,14 @@ complete_decision(Run, complete(Artifact)) :-
     finish(_{status:"complete",published:false}).
 
 finish(Outcome) :-
-    update(_{phase:Outcome.status,native_pending:false}), event(agent_event(run_finished, Outcome)).
+    checkpoint(S), executor(Config),
+    (Outcome.status=="complete", S.phase\=="complete",
+     member(M,S.view.messages),M.role=="assistant"
+    -> findall(T,(member(A,S.view.messages),A.role=="assistant",T=A.text),Texts),
+       last(Texts,Text),history_record(Config,S,Text,History),
+       Patch=_{history:History,phase:Outcome.status,native_pending:false}
+    ; Patch=_{phase:Outcome.status,native_pending:false}),
+    update(Patch), event(agent_event(run_finished, Outcome)).
 
 event(Canonical) :-
     checkpoint(S), Seq is S.view.at_seq + 1,
@@ -381,7 +592,7 @@ snapshot(Frame) :-
 
 commit_receipt(F, Payload) :-
     checkpoint(S), ui_v1_result_frame(S.session_id, F.request_id, "ok", Payload, Result),
-    Receipt = _{request_id:F.request_id, command:F.command, payload:F.payload, result:Result},
+    request_receipt(F,Result,Receipt),
     exclude(same_request(F.request_id), S.receipts, OldReceipts),
     append(OldReceipts, [Receipt], Receipts),
     update(_{receipts:Receipts}), write_frame(Result).
@@ -413,12 +624,12 @@ admit_request(F) :-
     (N < 1024 -> true ; reject("receipt_limit")),
     ui_v1_result_frame(S.session_id, F.request_id, "ok",
                       _{accepted:true, recovery:"inspect_snapshot_before_retry"}, Result),
-    Receipt = _{request_id:F.request_id, command:F.command, payload:F.payload, result:Result},
+    request_receipt(F,Result,Receipt),
     append(S.receipts, [Receipt], Receipts), update(_{receipts:Receipts}).
 same_request(Id, Receipt) :- Receipt.request_id == Id.
 reject_receipt(F, Code) :-
     checkpoint(S), ui_v1_error_frame(S.session_id, F.request_id, Code, "Command rejected", Result),
-    Receipt = _{request_id:F.request_id, command:F.command, payload:F.payload, result:Result},
+    request_receipt(F,Result,Receipt),
     exclude(same_request(F.request_id), S.receipts, Old),
     append(Old, [Receipt], Receipts), update(_{receipts:Receipts}), write_frame(Result).
 
@@ -441,3 +652,12 @@ command_error(F, _) :- reject_receipt(F, "invalid_arguments").
 fail_run(Run) :- checkpoint(S),
     (S.run_id == Run, S.phase == "running"
     -> finish(_{status:"failed", reason:"artifact_validation_failed"}) ; true).
+
+% Image bytes never enter durable request receipts. Preserve old receipt format
+% for ordinary commands and compare hashes separately from user-supplied keys.
+request_receipt(F,Result,Receipt) :-
+ (get_dict(images,F.payload,_) -> payload_digest(F.payload,D),Receipt=_{request_id:F.request_id,command:F.command,payload_digest:D,result:Result}
+ ; Receipt=_{request_id:F.request_id,command:F.command,payload:F.payload,result:Result}).
+payload_digest(P,D) :- atom_json_dict(JSON,P,[width(0)]),crypto_data_hash(JSON,H,[algorithm(sha256),encoding(utf8)]),atom_string(H,D).
+same_payload(Receipt,Payload) :-
+ (get_dict(payload_digest,Receipt,D) -> payload_digest(Payload,D) ; Receipt.payload =@= Payload).

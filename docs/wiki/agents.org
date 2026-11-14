@@ -131,7 +131,7 @@ When any skill file is configured or the system instruction is nonempty, AgentPr
 
 * Named agents are not runtime subagents
 
-The =agents= dictionary has no connection in this host to upstream subagent discovery or scheduling. There is no supported =/spawn=, =/agent=, =agent.spawn= or model-selectable named-agent invocation command. The host does not iterate through =agents=, choose a reviewer automatically, or share a pool of role-specific providers with recursive child calls.
+Named profiles do not spawn automatically. The explicitly enabled =/army= bridge below can delegate to selected profiles through the upstream supervisor. There is no supported =/spawn=, =/agent=, =agent.spawn= or model-selectable named-agent invocation command, automatic reviewer selection, or shared recursive provider fleet.
 
 The pinned upstream runtime has its own typed-plan, recursive completion, child capability and scheduling machinery. This does not mean every upstream option or API is exposed by AgentProlog. Product =runtime_options= are a closed whitelist; notably =child_capabilities/1= is not accepted. Budget keys such as =max_recursion_depth= and =max_concurrent_subcalls= constrain native execution where used, not a named-agent worker fleet. A recursion step is not automatically the configured =builder= or =reviewer=.
 
@@ -159,3 +159,265 @@ Important failures include =unknown_agent(Name)=, =duplicate_agent(Name)=, =nest
 - [[file:../../test/agentprolog_agents_test.pl][Agent tests]] and [[file:../../test/agentprolog_session_test.pl][Session tests]]: deterministic evidence, not live provider access.
 - [[file:../../examples/packs/coding/prolog/agentprolog_plugin.pl][Coding package]]: builder/reviewer example; workspace tools and grants must be composed separately.
 - [[file:configuration-cookbook.org][Configuration cookbook]], [[file:tutorial-todo-app.org][Todo-app tutorial]] and [[file:Home.org][Wiki home]].
+
+* Explicit native /army bridge
+
+Named profiles remain configurations, not independently running processes. The
+opt-in =/army= command now creates real logical children through Prolog-RLM's
+=rlm_agent= supervisor and =rlm_subagent_handler/7=. It does not add a product
+scheduler. Enable =runtime_options:[subagents(true)]= in trusted configuration;
+select one to 32 distinct existing named profiles:
+
+#+begin_example
+/army reader,reviewer inspect the design and check its assumptions
+#+end_example
+
+Selected profiles must use =mode:rlm=, have only read-effect tools among their granted capabilities, and retain the
+existing profile capability/budget narrowing rules. Ungranted inherited tools are
+removed from the child registry, so a read-only child may narrow a writing parent.
+Recursion capabilities =rlm=,
+=parallel= and =tool(rlm_subagent)= are rejected in child profiles. The operator
+must grant each model/context/tool capability through the usual configuration
+mechanism. Missing enablement/profiles or invalid quotas fail before a provider
+is called. No command text can supply a handler, provider, or expanded authority.
+
+This first bridge runs children sequentially with one canonical worker, not an
+autonomous or parallel fleet. It divides the parent's model calls, tokens, tool
+calls, context operations, output, cost and time limits into disjoint equal
+shares, additionally capped by each profile's limits. Unused shares are not
+redistributed. Children have zero recursion depth and at most one concurrent
+subcall. The whole run has its original deadline/cancellation token; cancellation
+stops the active child and no remaining profile is started. A failed child stops
+the batch. Usage comes from canonical child reports; unknown monetary cost stays
+unknown. Parent output bounds still apply to the combined report.
+
+Children receive the same question and configured bounded history; they do not
+automatically exchange answers or revise each other. The report retains profile,
+status, canonical result/usage and correlation as inert text, with native subagent
+lifecycle events in the UI. This is not a benchmark proving improved reasoning.
+Read-only delegation can still use operator-approved model/network access.
+
+This supersedes the old no-runtime-dispatch part of issue #56 only for this
+explicit command. Automatic model-selected spawning and effectful child approval
+flows are not implemented. No OpenCode dependency or integration is introduced.
+
+* /swarm is explicitly not a swarm
+
+=/swarm reader,reviewer QUESTION= uses precisely the /army implementation.
+It displays “This is not a swarm” and links the real upstream tracking issue:
+https://github.com/lost-rob0t/prolog-rlm/issues/568
+
+There is no swarm algorithm, shared mutable colony, autonomous goal selection,
+long-lived worker fleet or learned coordination in this stub.
+
+Batch usage is cumulative, including completed children before a later failure,
+output overflow or cancellation. Each returned child's known accounting is saved
+before the next child starts. Interrupted in-flight calls may have unreported
+provider charges; known totals are not a claim of a final bill. Tool-call totals
+are omitted when the upstream completion report does not supply them, rather
+than represented as zero.
+
+* Reading private notes
+
+=/remember= with no text reads the latest ten project-bound private notes. It
+requires the separate =tool(memory_recall)= capability and separately configured tools from
+=memory_read_tools/3=, invokes a read-only canonical tool, and makes no model call or
+write-approval request. =/remember TEXT= remains the approval-gated append.
+Notes are explicitly unverified, rendered as inert text, and never consulted as
+Prolog, promoted into facts, or automatically injected into later prompts.
+Reads retain the bounded file, project validation and stale-content checks;
+malformed/cross-project files fail closed. This is recall, not =/learn= or RSI.
+Both native memory command forms are excluded from completed-turn history even
+when =history_depth= is enabled. Legacy saved memory-command turns are filtered
+before provider projection and removed when history is next recorded. Private
+notes remain visible in the local UI/checkpoint; exclusion is not secure erasure.
+
+* Bounded symbolic RSI evaluation (not autonomous self-improvement)
+
+=/rsi NAME= invokes a trusted =rsi_evaluation_tool(Project, Spec, Tool)= registered
+by the host and granted as =tool(rsi_NAME)=. It does not edit itself or invoke a
+model. A closed Spec contains =id=, =version=, =baseline= and =candidate= expert
+contracts, and 1–16 fixed cases with =id/input/expected/origin=. Inputs and exact
+expected answers are bounded strings. Baseline and candidate must be distinct,
+provider-free, effect-free, no-child experts with identical limits and no required
+capabilities. Both execute through the canonical expert registry; the canonical
+benchmark module reports paired exact-answer accuracy and measured latency.
+
+This first slice implements measurement, not the full #404 EPOCH design:
+- The snapshot digest freezes configured contracts/cases/project, NOT executable
+  code, environment, dependency generations or independent validation provenance.
+- Origin labels are host declarations, not proof of source independence. Test
+  results are exposed and cannot be reused as an unexposed holdout claim.
+- Reports always return =decision:hold=, including positive accuracy deltas.
+  Regressions, failed experts and resource limits never authorize promotion.
+- Empty evidence, duplicate cases, asymmetric limits, capabilities and mismatched
+  projects are rejected. The host bounds time/output; each invocation additionally
+  has a fixed million-inference ceiling. Parent native-call budget covers both
+  sides of every case. No new scheduler is introduced.
+- No code generation, admission, rollback, self-modification, learned predicates,
+  neural updates, =/rsi-context= or =/sleep= is implemented by this slice.
+- Native RSI results stay out of provider turn history to avoid silently exposing
+  evaluation feedback to later model-driven candidate generation.
+
+Synthetic test evidence measures an echo candidate scoring 1.0 versus a fixed
+wrong-answer baseline scoring 0.0 on the SAME cases; reversing them reports -1.0
+and per-case regressions. This demonstrates the scoring path, not better general
+intelligence. Issue [[https://github.com/lost-rob0t/prolog-rlm/issues/404][#404]]
+remains the design reference for independent evidence, immutable executable
+snapshots and conditional promotion; [[https://github.com/lost-rob0t/prolog-rlm/issues/403][#403]]
+is the retrieval/projection design, not an implemented RSI guarantee.
+
+RSI evaluation is native-command-only: the configured tool binding rejects
+ordinary model/direct/RLM invocation before any expert runs. =/rsi= checks the
+project and parent batch budget, then creates a short-lived canonical registry
+for that checked invocation. Merely granting =tool(rsi_NAME)= cannot bypass those
+checks through the ordinary tool loop.
+
+* /sleep: canonical consolidation preview
+
+=/sleep= derives an LLM-generated, schema-checked warm-context candidate through
+Prolog-RLM =conversation_warm_derive/4=. It operates only on the existing bounded
+public completed-turn history (=history_depth= must be enabled); it is NOT a
+whole-project or Prolog-KB scan. The canonical history projector chooses the
+working set first. Empty history fails before a provider call.
+
+The preview carries the exact selected source messages, their digest and canonical
+source refs, suggested summary/decisions/facts/unresolved work, and canonical token
+estimates for alternative representations. All generated fields, including the
+field named =facts= by the upstream schema, remain UNVERIFIED model suggestions.
+Schema validation is not factual verification or a measured reasoning gain.
+Source refs come from a temporary conversation; the included source messages are
+the self-contained evidence snapshot, not a promise of a durable conversation URL.
+
+No source is deleted or rewritten. No warm artifact is published, no KB predicate
+is accepted, and no preview is automatically injected into later context. Private
+=/remember= turns, RSI evaluation feedback and earlier =/sleep= previews are
+excluded, including after restart. This slice is the derivation/inspection stage
+of sleep, not full sleep learning or autonomous consolidation.
+
+The host uses the configured provider; this can consume model budget. It grants
+no tools or recursion and narrows capabilities to explicit =model(PROVIDER)= and
+=context(peek)= entries already held by the parent. At most three model calls
+(within the parent limit) may retrieve and derive a summary. Parent time/token/
+cost/output limits and cancellation still apply. Reported generation usage is
+retained when a malformed response or final preview-size check fails. There is no
+background scheduler. A provider HTTP loopback fixture tests the real production
+transport, schema decoding, source snapshot and restart exclusion; fixture text
+is not evidence of real-world summary accuracy.
+
+* /rsi-context: measured project context-packing experiment
+
+=/rsi-context NAME= takes the current project through a host-configured bounded
+manifest, not a recursive filesystem crawl. A trusted plugin creates
+=context_experiment_tool(Project, Spec, Tool)= and grants
+=tool(context_experiment_NAME)=. The closed Spec has =id=, =token_budget= (1–4096)
+and 1–8 =files= entries (=id/path/mandatory/utility=). Utility is an integer
+0–100 assigned by the host, not a learned truth score.
+
+The native command safely reads the named project files, records exact hashes,
+uses the canonical estimated token counter, and compares:
+1. Fixed first-fit manifest order, after retaining all mandatory sources.
+2. Prolog-RLM =context_pack/4= optimization of the same units and token cap.
+
+The report includes selected/omitted IDs, token estimates, configured utility and
+its delta, and source hashes. Sources are rechecked after packing; a changed
+hash invalidates the comparison. Duplicate canonical paths cannot double-count
+one file. Traversal/symlinks follow existing workspace read restrictions. Each
+file is bounded by the workspace 64 KiB limit; the accepted set is at most
+128 KiB. All reads and rechecks fit the parent native-call budget. The parent
+context-operation, tool, token, time and output budgets remain gates.
+
+This is a zero-model experiment, always =decision:hold=. No project files or
+policies change, no source text is sent to a provider or inserted into future
+context, and native evaluation feedback is excluded from turn history. Ordinary
+model tool calls cannot bypass native scope/budget checks. Token estimates cover
+file text only, not a complete provider prompt or physical model window.
+Configured-utility improvement is NOT accuracy, generalization, independent
+relevance evidence, or autonomous self-improvement. Implementing those requires
+the evaluation/admission machinery still missing from #404.
+
+A reproducible fixture uses two equal-cost files with utilities 1 and 10 and a
+cap fitting one file: first-fit picks the former, canonical packing picks the
+latter, reporting +9 configured utility. Making the first mandatory forces both
+methods to retain it, reporting zero improvement. These are synthetic tests of
+the mechanism, not production performance claims.
+
+* /learn: finite symbolic normalizer proposal
+
+=/learn NAME= is a deliberately narrow implemented learning mechanism, not a
+general predicate inventor. A trusted host registers
+=learning_experiment_tool(Project, Spec, Tool)=, granting =tool(learn_NAME)=.
+The closed Spec has =id=, =discovery= and =evaluation= lists, each containing 1–4
+examples with =id/input/expected/origin=. Text is bounded to 4096 characters.
+
+The fixed safe catalog is identity, boundary-whitespace trimming, lowercase,
+and trim-then-lowercase. These execute as real provider-free canonical experts.
+All four are scored against discovery examples; only a UNIQUE perfect candidate
+is frozen for evaluation. Evaluation cannot break a discovery tie. That candidate
+and the identity baseline are then separately scored on the supplied evaluation
+examples using the canonical benchmark layer. A counterexample marks the proposal
+rejected. The report includes the exact configured evidence manifest, its digest,
+origins, per-example scores, baseline delta and a versioned inert primitive recipe.
+The selected recipe can be applied to later strings through the fixed normalizer
+implementation without generating or consulting any Prolog source.
+
+Exact input or origin-label overlap across discovery/evaluation is rejected, as
+are duplicate inputs within a split. This prevents obvious leakage but does NOT
+prove independent sampling, truthful labels, causal independence or statistical
+generalization. Origin labels are host assertions. Results expose the evaluation
+set; do not pretend repeated adaptive reuse is a fresh holdout. There is no
+promotion: all command reports say =decision:hold= and successful candidates stay
+=lifecycle:proposed=. No reusable KB fact, runtime policy or expert binding is
+automatically installed or persisted. Normal text in =/learn= is not executed.
+
+The native-only binding enforces project, capability and parent budget checks.
+Worst-case expert calls are four times discovery examples plus twice evaluation
+examples; the parent's native-call budget must cover that total. There is no model
+call, subprocess, network access or new scheduler. Native feedback is excluded
+from provider history. Time/output limits remain in force.
+
+A synthetic fixture discovers trim-then-lowercase from one padded uppercase input
+and tests it on a different labelled origin/input, scoring 1.0 versus identity's
+0.0. A later counterexample rejects the proposal; a discovery tie never consults
+evaluation to choose a winner. This demonstrates finite concept selection and
+recipe reuse, not open-ended autonomous learning, general intelligence or #404
+admission conformance.
+
+
+* Task-driven explicit army scaling
+
+The old four-child ceiling is removed. With =subagents(true)= the native bridge
+allows up to 32 tasks, subject to the parent aggregate budget. A trusted
+=army_max_children(N)= runtime option can lower that cap (1–32); it is stripped
+before provider invocation. More children do not grant more model calls, tokens,
+cost, time or tool access. A batch unable to give every child a nonzero required
+budget share fails BEFORE any child/provider call. Default budgets often limit
+usable tasks well below 32.
+
+The original =/army reader,reviewer QUESTION= form remains. For distinct jobs,
+use a closed JSON task list:
+
+#+begin_example
+/army tasks [{"id":"parse","profile":"reader","question":"Inspect parsing"},{"id":"cancel","profile":"reader","question":"Inspect cancellation"}]
+#+end_example
+
+Each task has a unique ID, existing trusted profile, and literal question.
+Specialist profiles may repeat; task IDs distinguish their lifecycle/results.
+Questions are inert text, not executable handlers or permission changes. JSON
+is bounded to 64 KiB, IDs/profiles to 64 characters and each question to 4096.
+Unknown fields and duplicate IDs fail closed. The word =tasks= is reserved in
+this command form. The number of explicit assignments drives fan-out; the host
+DOES NOT automatically decompose tasks or invent specialists.
+
+Execution remains sequential through the existing canonical supervisor and
+subagent adapter. Failure stops remaining assignments; cancellation stops active
+execution and skips queued work. Prior completed usage remains recorded. The
+supervisor trace is bounded to 16 events and reports retain answer, evidence,
+usage and canonical correlation rather than duplicating nested full execution
+snapshots for every child. There is no extra scheduler or claimed parallel speedup.
+
+=/swarm tasks JSON= is the same subagent stub and still explicitly says it is NOT
+a swarm, with upstream tracking issue #568. Actual swarm coordination remains out
+of scope. A five-task fixture demonstrates repeated-profile execution with five
+real canonical children under one parent budget, plus cancellation after the
+first completion preserving usage while suppressing later work.

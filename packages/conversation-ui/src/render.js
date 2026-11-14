@@ -3,7 +3,12 @@ export function safe(value) {
   return String(value).replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '')
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
 }
-const json = value => safe(JSON.stringify(value, null, 2));
+export function publicValue(value) {
+  if(Array.isArray(value))return value.map(publicValue);
+  if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,/^(reasoning|reasoning_details|thinking|chain_of_thought)$/i.test(k)?'[hidden]':publicValue(v)]));
+  return value;
+}
+const json = value => safe(JSON.stringify(publicValue(value), null, 2));
 export function render(view, connected = true) {
   if (!view.state) return 'AgentProlog — waiting for a canonical snapshot';
   const s = view.state;
@@ -11,7 +16,7 @@ export function render(view, connected = true) {
     `Connection: ${connected ? 'connected' : 'DISCONNECTED — displayed state is stale'}`,
     `Run outcome: ${safe(s.run?.outcome?.status ?? 'not terminal')} | stream: ${safe(s.status)}\n${json(s.run)}`,
     'A finished chat turn does not establish external workflow completion or publication.'];
-  for (const m of s.messages) lines.push(`\n${safe(m.role)} [${safe(m.status)}]\n${safe(m.text)}`);
+  for (const m of s.messages.filter(m=>!['reasoning','thinking','analysis'].includes(m.role))) lines.push(`\n${safe(m.role)} [${safe(m.status)}]\n${safe(m.text)}`);
   for (const [label, key] of [['Tools', 'tools'], ['Approvals', 'approvals'], ['Questions', 'questions'],
     ['Subagents', 'subagents'], ['Verification', 'verification'], ['Uncertain effects', 'indeterminate_effects'],
     ['Evidence / artifacts / extensions', 'extensions'], ['Trace references', 'traces']]) {

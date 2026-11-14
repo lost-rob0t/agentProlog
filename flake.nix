@@ -7,7 +7,7 @@
     prolog-rlm = {
       # Coordinated integration candidate: canonical UI v1, validated snapshots,
       # supported MCP execution APIs and the upstream Z.AI coding provider.
-      url = "github:lost-rob0t/prolog-rlm/4716ba8aa0bbf3fa1b96d80e8ed8e91d99973c85";
+      url = "github:lost-rob0t/prolog-rlm/a960fa98efe55c262c565c1a2f31c5e3ce3a28cf";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -80,9 +80,13 @@
             -s ${self}/test/agentprolog_config_test.pl \
             -s ${self}/test/agentprolog_agents_test.pl \
             -s ${self}/test/agentprolog_skills_test.pl \
-            -s ${self}/test/agentprolog_check_tool_test.pl \
+            -s ${self}/test/agentprolog_images_test.pl -s ${self}/test/agentprolog_repair_test.pl -s ${self}/test/agentprolog_patch_test.pl -s ${self}/test/agentprolog_discovery_test.pl -s ${self}/test/agentprolog_test_runner_test.pl -s ${self}/test/agentprolog_check_tool_test.pl \
             -s ${self}/test/documented_configs_test.pl \
             -s ${self}/test/agentprolog_session_test.pl \
+            -s ${self}/test/agentprolog_workflow_test.pl \
+            -s ${self}/test/agentprolog_experts_test.pl \
+            -s ${self}/test/agentprolog_memory_test.pl \
+            -s ${self}/test/agentprolog_learning_test.pl -s ${self}/test/agentprolog_context_experiment_test.pl -s ${self}/test/agentprolog_sleep_test.pl -s ${self}/test/agentprolog_rsi_test.pl -s ${self}/test/agentprolog_army_test.pl \
             -s ${self}/test/agentprolog_workspace_tools_test.pl -g "run_tests,halt"
           touch "$out"
         '';
