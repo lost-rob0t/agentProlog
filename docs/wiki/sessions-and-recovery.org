@@ -408,8 +408,8 @@ Narrow screens omit the rail. Session UUIDs are kept in diagnostics, not the
 normal chat header. Only observed user requests and canonical assistant output
 are shown; after reconnect the current request is labelled separately rather
 than inventing missing conversation history. The viewport follows recent output;
-=/inspect= retains the complete canonical diagnostic view. Full scrollback and a
-multiline editor are not implemented by this layout change.
+=/inspect= retains the complete canonical diagnostic view. The retained transcript viewport is bounded to the latest eight messages;
+a multiline input editor is not yet implemented.
 
 The thinking line remains an activity facade with observed elapsed time and
 reported usage only. Approval inspection still suspends redraw, displays the
@@ -423,3 +423,16 @@ emoji widths, the normal chat facade separates ZWJ components with a space;
 the canonical transcript is unchanged. Ambiguous-width characters assume the
 common one-column policy. An optional real-terminal cursor-position probe is
 available as =node packages/conversation-ui/test/terminal-width.probe.js=.
+
+* Bounded transcript navigation
+
+PageUp/PageDown or =/scroll up|down= move within the retained transcript.
+=/bottom= returns to the live tail. Scrolling up freezes a presentation copy so
+incoming text cannot shift what is being inspected; live approvals, questions,
+tool status and connection state remain current outside that copy. The header
+labels a paused transcript. Navigation sends no session/model requests.
+
+The draft input remains in readline during redraw. While an approval/question
+selection menu is open, page keys do not redraw or obscure it. Terminal resize
+returns to live output to reflow at the new width. This is bounded presentation
+history, not a new durable conversation store or infinite scrollback.

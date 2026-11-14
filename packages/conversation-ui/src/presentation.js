@@ -41,6 +41,25 @@ export function wrapText(text,width) {
   let out='',n=0;for(const c of segments(line)){const w=cellWidth(c);if(n+w>width){rows.push(out);out='';n=0;}out+=c;n+=w;}rows.push(out);
  }return rows;
 }
+// Bounded presentation-only scrollback. Never sends commands to the session.
+// Pausing freezes just transcript lines; live authority/status is still rendered.
+export class TranscriptViewport {
+ constructor(){this.live=[];this.frozen=null;this.top=0;this.rows=1;}
+ select(lines,rows){
+  this.live=lines;this.rows=Math.max(1,rows);
+  const source=this.frozen??lines,max=Math.max(0,source.length-this.rows);
+  const start=this.frozen?Math.min(this.top,max):max;
+  return source.slice(start,start+this.rows);
+ }
+ page(direction){
+  if(direction<0&&!this.frozen){this.frozen=this.live.slice();this.top=Math.max(0,this.frozen.length-this.rows);}
+  if(!this.frozen)return;
+  this.top=Math.max(0,this.top+direction*Math.max(1,this.rows-2));
+  if(this.top>=Math.max(0,this.frozen.length-this.rows))this.bottom();
+ }
+ bottom(){this.frozen=null;this.top=0;}
+ get paused(){return this.frozen!==null;}
+}
 export function renderChat(view,connected=true,activity=new Activity(),color=false,layout={}) {
  const cols=Math.max(20,Math.min(240,layout.columns??96));
  const height=Math.max(10,Math.min(100,layout.rows??30))-2;
@@ -54,7 +73,7 @@ export function renderChat(view,connected=true,activity=new Activity(),color=fal
  const usage=activity.tokens===null?'tokens pending':`${activity.tokens} reported total tokens`;
  const accent=x=>color?`\x1b[38;5;80m${x}\x1b[0m`:x;
  const muted=x=>color?`\x1b[38;5;245m${x}\x1b[0m`:x;
- const lines=[accent('  '+fit('AGENTPROLOG  /  DSH',cols-4)),muted('  '+fit(layout.profile??s.run?.profile??'Native Prolog workspace',cols-4)),muted('  '+'─'.repeat(cols-4))];
+ const lines=[accent('  '+fit('AGENTPROLOG  /  DSH',cols-4)),muted('  '+fit((layout.profile??s.run?.profile??'Native Prolog workspace')+(layout.viewport?.paused?' · PAUSED TRANSCRIPT':''),cols-4)),muted('  '+'─'.repeat(cols-4))];
  const content=[];
  const all=s.messages??[];
  const messages=all.filter(m=>['user','assistant'].includes(m.role)).slice(-8);
@@ -72,20 +91,20 @@ export function renderChat(view,connected=true,activity=new Activity(),color=fal
  const rail=['SESSION',connected?'● Connected':'○ Disconnected',status,'', 'TOOLS',...(tools.length?tools.map(t=>'› '+clip(t.name,24)):['No tools running']),'','APPROVALS',pending.length?`${pending.length} waiting · /approve`:'None pending',questions.length?`${questions.length} questions · /answer`:'','CONTEXT','/inspect  Evidence & usage','/profile  Active capabilities','/handoff  Workflow summary'];
  const reserve=5,bodyRows=height-lines.length-reserve;
  // Latest output remains visible. Full canonical transcript stays in /inspect.
- const visible=content.slice(-bodyRows);
+ const visible=layout.viewport?layout.viewport.select(content,bodyRows):content.slice(-bodyRows);
  for(let i=0;i<bodyRows;i++){
   const raw=visible[i]??'';
   const left=/^(YOU|CURRENT REQUEST|AGENTPROLOG)( |$)/.test(raw)?accent(fit(raw,main)):fit(raw,main);
   const right=side?muted(' │ '+fit(rail[i]??'',side)):'';
   lines.push('  '+left+right);
  }
- let notice=s.indeterminate_effects?.length?'Uncertain effects · /inspect before retrying':pending.length?`${pending.length} approval(s) waiting · /approve to inspect exact action`:questions.length?`${questions.length} question(s) waiting · /answer`:'';
+ let notice=s.indeterminate_effects?.length?'Uncertain effects · /inspect before retrying':pending.length?`${pending.length} approval(s) waiting · /approve to inspect exact action`:questions.length?`${questions.length} question(s) waiting · /answer`:layout.viewport?.paused?'Viewing paused transcript · /bottom returns to live output':'';
  lines.push(muted('  '+fit(notice,cols-4)));
  const stateText=running?`${!connected?'Paused · connection lost':status} · ${usage} · ${timing}`:`${status} · ${usage}`;
  lines.push(accent('  '+fit(stateText,cols-4)));
  lines.push(muted('  '+'─'.repeat(cols-4)));
  lines.push(muted('  '+fit(layout.image?`Attached locally: ${layout.image} · /send-image QUESTION to transmit`:'Message the agent  ·  Enter send  ·  /help commands',cols-4)));
- lines.push(muted('  '+fit('/inspect evidence   /cancel stop   /image attach   /quit exit',cols-4)));
+ lines.push(muted('  '+fit('PgUp/PgDn history   /bottom live   /inspect evidence   /cancel stop',cols-4)));
  return lines.join('\n');
 }
 

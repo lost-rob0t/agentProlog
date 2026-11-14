@@ -105,3 +105,29 @@ test('Unicode wide scripts omitted by legacy tables consume two terminal cells',
   assert.deepEqual(wrapText(text.repeat(3),4),[text.repeat(2),text]);
  }
 });
+
+import {TranscriptViewport} from '../src/presentation.js';
+test('scrollback freezes inspected transcript while new output arrives',()=>{
+ const v=new TranscriptViewport(),lines=Array.from({length:30},(_,i)=>String(i));
+ assert.deepEqual(v.select(lines,10),lines.slice(20));
+ v.page(-1);assert.equal(v.paused,true);
+ assert.deepEqual(v.select([...lines,'new output'],10),lines.slice(12,22));
+ v.page(-1);assert.deepEqual(v.select(lines,10),lines.slice(4,14));
+ v.page(-1);assert.deepEqual(v.select(lines,10),lines.slice(0,10));
+ v.bottom();assert.equal(v.paused,false);
+ assert.deepEqual(v.select([...lines,'new output'],10),[...lines,'new output'].slice(-10));
+});
+test('paging down reaches live tail; short content cannot trap paused mode',()=>{
+ const v=new TranscriptViewport(),lines=Array.from({length:30},(_,i)=>String(i));
+ v.select(lines,10);v.page(-1);v.page(1);assert.equal(v.paused,false);
+ v.select(['short'],10);v.page(-1);assert.equal(v.paused,false);
+});
+test('scrollback does not freeze pending approvals or expose reasoning',()=>{
+ const v=view(),scroll=new TranscriptViewport();
+ v.state.messages=[{role:'assistant',text:'line\n'.repeat(80)},{role:'reasoning',text:'PRIVATE_MARKER'}];
+ renderChat(v,true,new Activity(),false,{viewport:scroll});scroll.page(-1);
+ v.state.approvals=[{status:'pending'}];
+ const text=renderChat(v,true,new Activity(),false,{viewport:scroll});
+ assert.match(text,/Awaiting approval/);assert.match(text,/inspect exact action/);
+ assert.doesNotMatch(text,/PRIVATE_MARKER/);
+});

@@ -7,7 +7,7 @@ import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { Client } from './client.js';
 import { render, safe } from './render.js';
-import { Activity, renderChat, approvalDetails, shouldRedraw } from './presentation.js';
+import { Activity, TranscriptViewport, renderChat, approvalDetails, shouldRedraw } from './presentation.js';
 import {selectImage} from './images.js';
 import { Notifications, notificationOptions } from './notifications.js';
 export const HELP = `AgentProlog canonical conversation UI
@@ -35,6 +35,8 @@ Usage: agentProlog [--project DIR] [--state DIR]
 /send-image QUESTION      send selected image to configured provider
 /image-clear              discard selected image
 /profile                  show runtime-owned profile and capabilities
+/scroll up|down           page through bounded transcript (TTY only)
+/bottom                   return to live output (TTY only)
 /inspect                  toggle canonical evidence/usage view and chat view
 /reconnect                restart connection and obtain a canonical checkpoint
 /cancel                   request canonical session cancellation
@@ -156,15 +158,22 @@ export async function main(argv = process.argv.slice(2)) {
   };
   let inspecting=false;
   const activity=new Activity();
+  const viewport=new TranscriptViewport();
   client.on('view',(view,frame)=>activity.consume(view,frame));
   const show = (inspect=inspecting) => {
     if(!shouldRedraw(process.stdout.isTTY,mode))return;
     if (process.stdout.isTTY) process.stdout.write('\x1b[2J\x1b[H');
-    process.stdout.write((process.stdout.isTTY?'':'\n') + (process.stdout.isTTY&&!inspect ? renderChat(client.view,client.connected,activity,!process.env.NO_COLOR,{columns:process.stdout.columns,rows:process.stdout.rows,profile:client.descriptor?.profile,image:selectedImage?.name}) : render(client.view,client.connected)) + '\n');
+    process.stdout.write((process.stdout.isTTY?'':'\n') + (process.stdout.isTTY&&!inspect ? renderChat(client.view,client.connected,activity,!process.env.NO_COLOR,{columns:process.stdout.columns,rows:process.stdout.rows,profile:client.descriptor?.profile,image:selectedImage?.name,viewport}) : render(client.view,client.connected)) + '\n');
     if(!process.stdout.isTTY||inspect)menuBlock();
     rl.setPrompt(promptText()); rl.prompt(true);
   };
-  process.stdout.on('resize',()=>show());
+  const onResize=()=>{viewport.bottom();show();};
+  process.stdout.on('resize',onResize);
+  const onKey=(_text,key)=>{
+    if(!process.stdout.isTTY||mode||inspecting||!['pageup','pagedown'].includes(key?.name))return;
+    viewport.page(key.name==='pageup'?-1:1);show();
+  };
+  process.stdin.on('keypress',onKey);
   let renderTimer;
   client.on('view', () => { if(!renderTimer)renderTimer=setTimeout(()=>{renderTimer=null;show();},40); });
   const heartbeat=setInterval(()=>{if(process.stdout.isTTY&&client.connected&&client.view.state?.status==='running')show();},250);
@@ -173,7 +182,7 @@ export async function main(argv = process.argv.slice(2)) {
   client.on('diagnostic', text => process.stderr.write(safe(text)));
   rl.setPrompt('agentprolog> ');
   let closing = false;
-  const close = async () => { if (closing) return; closing = true; clearTimeout(renderTimer); clearInterval(heartbeat); rl.close(); process.stdin.pause(); await client.close(); };
+  const close = async () => { if (closing) return; closing = true; clearTimeout(renderTimer); clearInterval(heartbeat); process.stdout.off('resize',onResize);process.stdin.off('keypress',onKey); rl.close(); process.stdin.pause(); await client.close(); };
   rl.on('close', close);
   process.once('SIGINT', close); process.once('SIGTERM', close);
   const dispatch = async (op, words, line) => {
@@ -189,6 +198,13 @@ export async function main(argv = process.argv.slice(2)) {
       if(!selectedImage)throw new Error('Select an image first with /image PATH.');
       const objective=line.slice('/send-image'.length).trim();if(!objective)throw new Error('Provide the image question.');
       await client.command('session.turn',{objective,images:[selectedImage]});selectedImage=null;
+    }
+    else if(op==='/scroll'||op==='/bottom'){
+      if(!process.stdout.isTTY)throw new Error('Transcript navigation requires a terminal.');
+      if(op==='/bottom')viewport.bottom();
+      else if(words.length===1&&['up','down'].includes(words[0]))viewport.page(words[0]==='up'?-1:1);
+      else throw new Error('Usage: /scroll up|down');
+      show();
     }
     else if (op === '/inspect') {inspecting=!inspecting;show();}
     else if (op === '/profile') process.stdout.write(safe(JSON.stringify(client.descriptor, null, 2)) + '\n');
