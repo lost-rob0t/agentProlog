@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { Client } from './client.js';
 import { render, safe } from './render.js';
 import { Activity, TranscriptViewport, renderChat, approvalDetails, shouldRedraw } from './presentation.js';
+import {Composer} from './composer.js';
 import {selectImage} from './images.js';
 import { Notifications, notificationOptions } from './notifications.js';
 export const HELP = `AgentProlog canonical conversation UI
@@ -34,6 +35,12 @@ Usage: agentProlog [--project DIR] [--state DIR]
 /image PATH               select local PNG/JPEG, not sent yet (max 256 KiB)
 /send-image QUESTION      send selected image to configured provider
 /image-clear              discard selected image
+/compose                  open/resume an in-memory multiline draft
+/draft-preview|undo       inspect draft or remove last line (in composer)
+/draft-edit N TEXT        replace a draft line, preserving text
+/draft-send[-image]       explicitly send draft (with selected image if requested)
+/draft-pause|discard      leave composer, retaining or discarding draft
+/draft-literal TEXT       insert a reserved draft-control line literally
 /profile                  show runtime-owned profile and capabilities
 /scroll up|down           page through bounded transcript (TTY only)
 /bottom                   return to live output (TTY only)
@@ -112,6 +119,8 @@ export async function main(argv = process.argv.slice(2)) {
   // mode: null | {kind:'answer'|'approve', id} | {kind:'select', items}
   let mode = null;
   let selectedImage=null;
+  const composer=new Composer();
+  let draftPendingSignature="";
   const openPending = () => {
     const state = client.view?.state ?? {};
     return {
@@ -119,7 +128,7 @@ export async function main(argv = process.argv.slice(2)) {
       approvals: (state.approvals ?? []).filter(row => row.status === 'pending'),
     };
   };
-  const promptText = () => mode === null ? (process.stdout.isTTY?'  › ':'agentprolog> ')
+  const promptText = () => composer.active ? `draft ${composer.lines.length+1}> ` : mode === null ? (process.stdout.isTTY?'  › ':'agentprolog> ')
     : mode.kind === 'select' ? 'select> ' : `${mode.kind} ${mode.id}> `;
   const showInteraction = row => {
     if(mode.kind==='approve'){mode.signature=JSON.stringify(row);process.stdout.write(`\n${approvalDetails(row)}\n`);}
@@ -161,6 +170,7 @@ export async function main(argv = process.argv.slice(2)) {
   const viewport=new TranscriptViewport();
   client.on('view',(view,frame)=>activity.consume(view,frame));
   const show = (inspect=inspecting) => {
+    if(composer.active)return;
     if(!shouldRedraw(process.stdout.isTTY,mode))return;
     if (process.stdout.isTTY) process.stdout.write('\x1b[2J\x1b[H');
     process.stdout.write((process.stdout.isTTY?'':'\n') + (process.stdout.isTTY&&!inspect ? renderChat(client.view,client.connected,activity,!process.env.NO_COLOR,{columns:process.stdout.columns,rows:process.stdout.rows,profile:client.descriptor?.profile,image:selectedImage?.name,viewport}) : render(client.view,client.connected)) + '\n');
@@ -175,7 +185,7 @@ export async function main(argv = process.argv.slice(2)) {
   };
   process.stdin.on('keypress',onKey);
   let renderTimer;
-  client.on('view', () => { if(!renderTimer)renderTimer=setTimeout(()=>{renderTimer=null;show();},40); });
+  client.on('view', () => { if(composer.active){const pending=openPending();const signature=JSON.stringify(pending);if(signature!==draftPendingSignature&&(pending.approvals.length||pending.questions.length))process.stdout.write('\nPending interaction: /draft-pause then /approve or /answer to inspect.\n');draftPendingSignature=signature;return;} if(!renderTimer)renderTimer=setTimeout(()=>{renderTimer=null;show();},40); });
   const heartbeat=setInterval(()=>{if(process.stdout.isTTY&&client.connected&&client.view.state?.status==='running')show();},250);
   heartbeat.unref();
   client.on('fault', error => { process.stderr.write(`\n${safe(error.code ?? 'error')}: ${safe(error.message)}\n`); show(); });
@@ -186,6 +196,7 @@ export async function main(argv = process.argv.slice(2)) {
   rl.on('close', close);
   process.once('SIGINT', close); process.once('SIGTERM', close);
   const dispatch = async (op, words, line) => {
+    if(op==='/compose'){composer.active=true;process.stdout.write('Multiline draft: Enter adds a line; /draft-send sends. /draft-preview, /draft-edit N TEXT, /draft-undo, /draft-pause, /draft-discard. Other slash lines are literal. Draft stays local until sent.\n');return;}
     if (op === '/quit') return await close();
     if (op === '/help') process.stdout.write(HELP);
     else if(op==='/image') {
@@ -265,7 +276,18 @@ export async function main(argv = process.argv.slice(2)) {
   rl.on('line', async line => {
     const [op, ...words] = line.trim().split(/\s+/);
     try {
-      if (mode) {
+      if(composer.active){
+        let action;
+        if(line.startsWith('/draft-literal ')){if(composer.sending)throw new Error('Draft send is pending.');composer.literal(line.slice(15));action='append';}
+        else action=composer.input(line);
+        if(action==='preview')process.stdout.write(composer.lines.map((text,i)=>`${i+1}: ${safe(text)}`).join('\n')+'\n');
+        if(action==='send'||action==='send-image'){
+          if(action==='send-image'&&!selectedImage)throw new Error('No selected image. /draft-pause then /image PATH, then /compose.');
+          composer.sending=true;
+          try{await client.command('session.turn',{objective:composer.text,...(action==='send-image'?{images:[selectedImage]}:{})});composer.sent();if(action==='send-image')selectedImage=null;}
+          finally{composer.sending=false;}
+        }
+      } else if (mode) {
         if (op === '/back' || (mode.kind === 'select' && !op)) mode = null;
         else if (op?.startsWith('/')) { mode = null; await dispatch(op, words, line); }
         else if (mode.kind === 'answer') {

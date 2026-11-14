@@ -436,3 +436,30 @@ The draft input remains in readline during redraw. While an approval/question
 selection menu is open, page keys do not redraw or obscure it. Terminal resize
 returns to live output to reflow at the new width. This is bounded presentation
 history, not a new durable conversation store or infinite scrollback.
+
+** Explicit multiline composer
+
+=/compose= opens or resumes a local, in-memory draft. Enter appends an exact
+line (including indentation and blank lines); ordinary slash lines are content,
+not UI commands. =/draft-preview= prints numbered lines, =/draft-edit N TEXT=
+replaces a line, and =/draft-undo= removes the last line. The limits are 256 lines, 16,000 Unicode characters
+(the canonical objective limit), and 16 KiB UTF-8. =/draft-literal TEXT= inserts reserved draft control text.
+
+=/draft-send= submits one objective. =/draft-send-image= explicitly includes the
+previously selected image. Drafts starting with a slash command are rejected so
+the native backend cannot unexpectedly dispatch the draft as an expert command.
+Successful sends clear the draft; failed sends retain it, but a transport failure
+can have an uncertain remote outcome: inspect/reconnect before manually retrying.
+No draft is persisted to disk or automatically sent on exit.
+
+=/draft-pause= keeps the draft and returns to ordinary commands; =/compose=
+resumes it. =/draft-discard= clears it. Pending interaction changes print a notice;
+pause and use =/approve= or =/answer= to inspect the actual current interaction.
+Full-screen redraw is suspended while composing so line edits and previews remain
+visible. Backend streaming still runs; return to chat to see its latest output.
+This is a bounded line composer, not a full-screen editor or a bracketed-paste
+security boundary. Readline supports editing the current line; completed lines
+use the explicit edit command. Transcript navigation remains in ordinary chat.
+
+Reproducible PTY check (production CLI with synthetic protocol sidecar, no LLM):
+=python packages/conversation-ui/test/composer.pty.py "$(command -v node)"=.
