@@ -38,6 +38,9 @@ Usage: agentProlog [--project DIR] [--state DIR]
 /compose                  open/resume an in-memory multiline draft
 /draft-preview|undo       inspect draft or remove last line (in composer)
 /draft-edit N TEXT        replace a draft line, preserving text
+/draft-insert N TEXT      insert before N (or append at next line)
+/draft-delete N           delete one draft line
+/draft-preview [N [END]]  inspect at most 50 numbered draft lines
 /draft-send[-image]       explicitly send draft (with selected image if requested)
 /draft-pause|discard      leave composer, retaining or discarding draft
 /draft-literal TEXT       insert a reserved draft-control line literally
@@ -196,7 +199,7 @@ export async function main(argv = process.argv.slice(2)) {
   rl.on('close', close);
   process.once('SIGINT', close); process.once('SIGTERM', close);
   const dispatch = async (op, words, line) => {
-    if(op==='/compose'){composer.active=true;process.stdout.write('Multiline draft: Enter adds a line; /draft-send sends. /draft-preview, /draft-edit N TEXT, /draft-undo, /draft-pause, /draft-discard. Other slash lines are literal. Draft stays local until sent.\n');return;}
+    if(op==='/compose'){composer.active=true;process.stdout.write('Multiline draft: Enter adds a line; /draft-send sends. /draft-preview, /draft-edit N TEXT, /draft-insert N TEXT, /draft-delete N, /draft-undo, /draft-pause, /draft-discard. Other slash lines are literal. Draft stays local until sent.\n');return;}
     if (op === '/quit') return await close();
     if (op === '/help') process.stdout.write(HELP);
     else if(op==='/image') {
@@ -280,7 +283,11 @@ export async function main(argv = process.argv.slice(2)) {
         let action;
         if(line.startsWith('/draft-literal ')){if(composer.sending)throw new Error('Draft send is pending.');composer.literal(line.slice(15));action='append';}
         else action=composer.input(line);
-        if(action==='preview')process.stdout.write(composer.lines.map((text,i)=>`${i+1}: ${safe(text)}`).join('\n')+'\n');
+        if(action==='preview'||action?.kind==='preview'){
+          const start=action.start??1,end=action.end??Math.min(20,composer.lines.length);
+          process.stdout.write(composer.lines.slice(start-1,end).map((text,i)=>`${start+i}: ${safe(text)}`).join('\n')+'\n');
+          process.stdout.write(`Draft: ${composer.lines.length} lines; showing ${composer.lines.length?`${start}-${end}`:'none'}. /draft-preview N END (max 50).\n`);
+        }
         if(action==='send'||action==='send-image'){
           if(action==='send-image'&&!selectedImage)throw new Error('No selected image. /draft-pause then /image PATH, then /compose.');
           composer.sending=true;

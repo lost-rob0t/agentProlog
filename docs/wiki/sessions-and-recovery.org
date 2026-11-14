@@ -442,7 +442,12 @@ history, not a new durable conversation store or infinite scrollback.
 =/compose= opens or resumes a local, in-memory draft. Enter appends an exact
 line (including indentation and blank lines); ordinary slash lines are content,
 not UI commands. =/draft-preview= prints numbered lines, =/draft-edit N TEXT=
-replaces a line, and =/draft-undo= removes the last line. The limits are 256 lines, 16,000 Unicode characters
+replaces a line, and =/draft-undo= removes the last line. =/draft-insert N TEXT=
+inserts before a line (or appends at the next line number); =/draft-delete N=
+removes one line. Edits preserve spaces and reject invalid positions or limit
+overflows without changing the draft. Preview defaults to the first 20 lines;
+=/draft-preview N END= inspects an inclusive range of at most 50 lines.
+Insert/delete preview the nearby lines rather than dumping the whole draft. The limits are 256 lines, 16,000 Unicode characters
 (the canonical objective limit), and 16 KiB UTF-8. =/draft-literal TEXT= inserts reserved draft control text.
 
 =/draft-send= submits one objective. =/draft-send-image= explicitly includes the

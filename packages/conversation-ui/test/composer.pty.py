@@ -21,6 +21,10 @@ with tempfile.TemporaryDirectory() as tmp:
         line('/cancel');expect(b'draft 5>')
         assert not log.exists(),'draft executed a slash command'
         line('/draft-edit 2   bar(X).');expect(b'2:   bar(X).')
+        line('/draft-insert 3   inserted');expect(b'3:   inserted')
+        line('/draft-preview 2 4');expect(b'showing 2-4')
+        line('/draft-delete 99');expect(b'No such draft line.')
+        line('/draft-delete 3');expect(b'Draft: 4 lines')
         line('/draft-pause');expect(b'  \xe2\x80\xba ')
         line('/compose');expect(b'draft 5>')
         line('/draft-send');expect(b'  \xe2\x80\xba ')
